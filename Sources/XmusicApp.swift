@@ -1,11 +1,5 @@
-//
-//  XmusicApp.swift
-//  Xmusic
-//
-//  Created by will on 2026/1/27.
-//
-
 import SwiftUI
+import SwiftData
 
 @main
 struct XmusicApp: App {
@@ -13,5 +7,6 @@ struct XmusicApp: App {
         WindowGroup {
             ContentView()
         }
+        .modelContainer(for: [MusicTrackEntity.self, RecentTrackEntity.self])
     }
 }
