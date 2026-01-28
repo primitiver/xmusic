@@ -112,7 +112,26 @@ struct RecentPlaylistView: View {
         }
         
         if let index = tracks.firstIndex(where: { $0.id == item.id }) {
-            playerManager.setPlaylist(tracks: tracks, startIndex: index)
+            let targetTrack = tracks[index]
+            MusicApiService.shared.resolvePlayUrl(url: targetTrack.audioUrl) { url in
+                guard let realUrl = url else { return }
+                DispatchQueue.main.async {
+                    var playableTracks = tracks
+                    let updatedTrack = PlayerManager.MusicTrack(
+                        id: targetTrack.id,
+                        name: targetTrack.name,
+                        singer: targetTrack.singer,
+                        albumName: targetTrack.albumName,
+                        imageUrl: targetTrack.imageUrl,
+                        audioUrl: realUrl,
+                        lrcUrl: targetTrack.lrcUrl,
+                        lrc: targetTrack.lrc
+                    )
+                    playableTracks[index] = updatedTrack
+                    
+                    self.playerManager.setPlaylist(tracks: playableTracks, startIndex: index)
+                }
+            }
         }
         
         dismiss()

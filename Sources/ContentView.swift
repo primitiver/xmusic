@@ -239,7 +239,9 @@ struct HomeView: View {
                     lrc: nil
                 )
                 playerManager.play(track: track)
-                saveToRecent(track)
+                // Save the original source URL (item.absoluteUrl) for persistence, 
+                // so we can re-resolve it later (e.g. from Recent or Favorites)
+                saveToRecent(track, originalUrl: item.absoluteUrl)
                 
                 // Fetch lyric too
                 MusicApiService.shared.fetchLyric(lrcUrl: item.absoluteLrc) { lrc in
@@ -248,7 +250,7 @@ struct HomeView: View {
                             playerManager.lyrics = lyric
                             var updated = track
                             updated.lrc = lyric
-                            saveToRecent(updated)
+                            saveToRecent(updated, originalUrl: item.absoluteUrl)
                         }
                     }
                 }
@@ -271,18 +273,40 @@ struct HomeView: View {
         }
         
         if let index = tracks.firstIndex(where: { $0.id == item.id }) {
-            playerManager.setPlaylist(tracks: tracks, startIndex: index)
-            saveToRecent(tracks[index])
-            
-            // If content missing but URL exists, fetch it
-            if item.lrc == nil, let lrcUrl = item.lrcUrl {
-                MusicApiService.shared.fetchLyric(lrcUrl: lrcUrl) { lrc in
-                    if let lyric = lrc {
-                        DispatchQueue.main.async {
-                            playerManager.lyrics = lyric
-                            var updated = tracks[index]
-                            updated.lrc = lyric
-                            saveToRecent(updated)
+            // Resolve the target track's URL because Recent list might store unresolved source URLs
+            let targetTrack = tracks[index]
+            MusicApiService.shared.resolvePlayUrl(url: targetTrack.audioUrl) { url in
+                guard let realUrl = url else { return }
+                DispatchQueue.main.async {
+                    var playableTracks = tracks
+                    // Update the target track with the fresh resolved URL
+                    let updatedTrack = PlayerManager.MusicTrack(
+                        id: targetTrack.id,
+                        name: targetTrack.name,
+                        singer: targetTrack.singer,
+                        albumName: targetTrack.albumName,
+                        imageUrl: targetTrack.imageUrl,
+                        audioUrl: realUrl,
+                        lrcUrl: targetTrack.lrcUrl,
+                        lrc: targetTrack.lrc
+                    )
+                    playableTracks[index] = updatedTrack
+                    
+                    self.playerManager.setPlaylist(tracks: playableTracks, startIndex: index)
+                    // Update recent time, keeping the original URL (which is in item.audioUrl)
+                    self.saveToRecent(updatedTrack, originalUrl: item.audioUrl)
+                    
+                    // If content missing but URL exists, fetch it
+                    if item.lrc == nil, let lrcUrl = item.lrcUrl {
+                        MusicApiService.shared.fetchLyric(lrcUrl: lrcUrl) { lrc in
+                            if let lyric = lrc {
+                                DispatchQueue.main.async {
+                                    self.playerManager.lyrics = lyric
+                                    var withLyric = updatedTrack
+                                    withLyric.lrc = lyric
+                                    self.saveToRecent(withLyric, originalUrl: item.audioUrl)
+                                }
+                            }
                         }
                     }
                 }
@@ -290,7 +314,7 @@ struct HomeView: View {
         }
     }
     
-    private func saveToRecent(_ track: PlayerManager.MusicTrack) {
+    private func saveToRecent(_ track: PlayerManager.MusicTrack, originalUrl: String? = nil) {
         // De-duplicate: remove existing entry with same ID
         if let existing = recentTracks.first(where: { $0.id == track.id }) {
             modelContext.delete(existing)
@@ -302,7 +326,8 @@ struct HomeView: View {
             singer: track.singer,
             albumName: track.albumName,
             imageUrl: track.imageUrl,
-            audioUrl: track.audioUrl,
+            // Use originalUrl if provided (preferred for persistence), otherwise current track url
+            audioUrl: originalUrl ?? track.audioUrl,
             lrcUrl: track.lrcUrl,
             lrc: track.lrc,
             lastPlayed: Date()
@@ -488,7 +513,7 @@ struct SearchView: View {
                     lrc: nil
                 )
                 playerManager.play(track: track)
-                saveToRecent(track)
+                saveToRecent(track, originalUrl: item.absoluteUrl)
                 
                 // Fetch lyric
                 MusicApiService.shared.fetchLyric(lrcUrl: item.absoluteLrc) { lrc in
@@ -498,7 +523,7 @@ struct SearchView: View {
                             // Update the track in player and save with content
                             var updatedTrack = track
                             updatedTrack.lrc = lyric
-                            saveToRecent(updatedTrack)
+                            saveToRecent(updatedTrack, originalUrl: item.absoluteUrl)
                         }
                     } else {
                         DispatchQueue.main.async {
@@ -510,7 +535,7 @@ struct SearchView: View {
         }
     }
     
-    private func saveToRecent(_ track: PlayerManager.MusicTrack) {
+    private func saveToRecent(_ track: PlayerManager.MusicTrack, originalUrl: String? = nil) {
         // De-duplicate using FetchDescriptor
         let trackId = track.id
         let descriptor = FetchDescriptor<RecentTrackEntity>(predicate: #Predicate { $0.id == trackId })
@@ -524,7 +549,7 @@ struct SearchView: View {
             singer: track.singer,
             albumName: track.albumName,
             imageUrl: track.imageUrl,
-            audioUrl: track.audioUrl,
+            audioUrl: originalUrl ?? track.audioUrl,
             lrcUrl: track.lrcUrl,
             lrc: track.lrc,
             lastPlayed: Date()
@@ -541,36 +566,29 @@ struct SearchView: View {
             modelContext.delete(favorites[existingIndex])
             HapticManager.shared.notification(type: .success)
         } else {
-            // We need the resolved audio URL to save it to favorites
-            // For now, save with absoluteUrl and we will resolve it when playing from library if needed, 
-            // but the entity expects a playback URL. Let's resolve it now.
-            MusicApiService.shared.resolvePlayUrl(url: item.absoluteUrl) { url in
-                guard let audioUrl = url else { return }
-                DispatchQueue.main.async {
-                    let favorite = MusicTrackEntity(
-                        id: item.id,
-                        name: item.name,
-                        singer: item.artist,
-                        albumName: nil,
-                        imageUrl: item.absoluteCover,
-                        audioUrl: audioUrl,
-                        lrcUrl: item.absoluteLrc,
-                        lrc: nil
-                    )
-                    modelContext.insert(favorite)
-                    
-                    // Also try to fetch lyrics to save them
-                    MusicApiService.shared.fetchLyric(lrcUrl: item.absoluteLrc) { lrc in
-                        if let lyric = lrc {
-                            DispatchQueue.main.async {
-                                favorite.lrc = lyric
-                            }
-                        }
+            // Save with absoluteUrl (unresolved) so we can resolve it fresh when playing from favorites
+            let favorite = MusicTrackEntity(
+                id: item.id,
+                name: item.name,
+                singer: item.artist,
+                albumName: nil,
+                imageUrl: item.absoluteCover,
+                audioUrl: item.absoluteUrl,
+                lrcUrl: item.absoluteLrc,
+                lrc: nil
+            )
+            modelContext.insert(favorite)
+            
+            // Also try to fetch lyrics to save them
+            MusicApiService.shared.fetchLyric(lrcUrl: item.absoluteLrc) { lrc in
+                if let lyric = lrc {
+                    DispatchQueue.main.async {
+                        favorite.lrc = lyric
                     }
-                    
-                    HapticManager.shared.notification(type: .success)
                 }
             }
+            
+            HapticManager.shared.notification(type: .success)
         }
     }
 }
@@ -635,26 +653,33 @@ struct LibraryView: View {
     }
     
     private func playTrack(_ item: MusicTrackEntity) {
-        let track = PlayerManager.MusicTrack(
-            id: item.id,
-            name: item.name,
-            singer: item.singer,
-            albumName: item.albumName,
-            imageUrl: item.imageUrl,
-            audioUrl: item.audioUrl,
-            lrcUrl: item.lrcUrl,
-            lrc: item.lrc
-        )
-        playerManager.play(track: track)
-        
-        // If content is missing but URL exists, fetch it
-        if item.lrc == nil, let lrcUrl = item.lrcUrl {
-             MusicApiService.shared.fetchLyric(lrcUrl: lrcUrl) { lrc in
-                if let lyric = lrc {
-                    DispatchQueue.main.async {
-                        playerManager.lyrics = lyric
-                        // Optionally update entity with content
-                        item.lrc = lyric
+        // Resolve the URL before playback to ensure it's fresh/valid
+        MusicApiService.shared.resolvePlayUrl(url: item.audioUrl) { url in
+            guard let audioUrl = url else { return }
+            
+            DispatchQueue.main.async {
+                let track = PlayerManager.MusicTrack(
+                    id: item.id,
+                    name: item.name,
+                    singer: item.singer,
+                    albumName: item.albumName,
+                    imageUrl: item.imageUrl,
+                    audioUrl: audioUrl,
+                    lrcUrl: item.lrcUrl,
+                    lrc: item.lrc
+                )
+                playerManager.play(track: track)
+                
+                // If content is missing but URL exists, fetch it
+                if item.lrc == nil, let lrcUrl = item.lrcUrl {
+                     MusicApiService.shared.fetchLyric(lrcUrl: lrcUrl) { lrc in
+                        if let lyric = lrc {
+                            DispatchQueue.main.async {
+                                playerManager.lyrics = lyric
+                                // Optionally update entity with content
+                                item.lrc = lyric
+                            }
+                        }
                     }
                 }
             }

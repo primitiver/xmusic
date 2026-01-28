@@ -145,7 +145,7 @@ struct DetailListView: View {
                     lrc: nil
                 )
                 playerManager.play(track: track)
-                saveToRecent(track)
+                saveToRecent(track, originalUrl: item.absoluteUrl)
                 
                 // Fetch lyric
                 MusicApiService.shared.fetchLyric(lrcUrl: item.absoluteLrc) { lrc in
@@ -154,7 +154,7 @@ struct DetailListView: View {
                             playerManager.lyrics = lyric
                             var updated = track
                             updated.lrc = lyric
-                            saveToRecent(updated)
+                            saveToRecent(updated, originalUrl: item.absoluteUrl)
                         }
                     }
                 }
@@ -162,7 +162,7 @@ struct DetailListView: View {
         }
     }
     
-    private func saveToRecent(_ track: PlayerManager.MusicTrack) {
+    private func saveToRecent(_ track: PlayerManager.MusicTrack, originalUrl: String? = nil) {
         // De-duplicate using FetchDescriptor
         let trackId = track.id
         let descriptor = FetchDescriptor<RecentTrackEntity>(predicate: #Predicate { $0.id == trackId })
@@ -176,7 +176,7 @@ struct DetailListView: View {
             singer: track.singer,
             albumName: track.albumName,
             imageUrl: track.imageUrl,
-            audioUrl: track.audioUrl,
+            audioUrl: originalUrl ?? track.audioUrl,
             lrcUrl: track.lrcUrl,
             lrc: track.lrc,
             lastPlayed: Date()
@@ -193,33 +193,29 @@ struct DetailListView: View {
             modelContext.delete(favorites[existingIndex])
             HapticManager.shared.notification(type: .success)
         } else {
-            MusicApiService.shared.resolvePlayUrl(url: item.absoluteUrl) { url in
-                guard let audioUrl = url else { return }
-                DispatchQueue.main.async {
-                    let favorite = MusicTrackEntity(
-                        id: item.id,
-                        name: item.name,
-                        singer: item.artist,
-                        albumName: nil,
-                        imageUrl: item.absoluteCover,
-                        audioUrl: audioUrl,
-                        lrcUrl: item.absoluteLrc,
-                        lrc: nil
-                    )
-                    modelContext.insert(favorite)
-                    
-                    // Also try to fetch lyrics to save them
-                    MusicApiService.shared.fetchLyric(lrcUrl: item.absoluteLrc) { lrc in
-                        if let lyric = lrc {
-                            DispatchQueue.main.async {
-                                favorite.lrc = lyric
-                            }
-                        }
+            // Save with absoluteUrl (unresolved)
+            let favorite = MusicTrackEntity(
+                id: item.id,
+                name: item.name,
+                singer: item.artist,
+                albumName: nil,
+                imageUrl: item.absoluteCover,
+                audioUrl: item.absoluteUrl,
+                lrcUrl: item.absoluteLrc,
+                lrc: nil
+            )
+            modelContext.insert(favorite)
+            
+            // Also try to fetch lyrics to save them
+            MusicApiService.shared.fetchLyric(lrcUrl: item.absoluteLrc) { lrc in
+                if let lyric = lrc {
+                    DispatchQueue.main.async {
+                        favorite.lrc = lyric
                     }
-                    
-                    HapticManager.shared.notification(type: .success)
                 }
             }
+            
+            HapticManager.shared.notification(type: .success)
         }
     }
 }
