@@ -162,8 +162,9 @@ struct PlayerView: View {
                             .frame(height: 3) // Match slider track height approximately
                             
                             Slider(value: $localTime, in: 0...max(playerManager.duration, 1), onEditingChanged: { dragging in
-                                isDraggingSlider = dragging
-                                if !dragging {
+                                if dragging {
+                                    isDraggingSlider = true
+                                } else {
                                     playerManager.seek(to: localTime)
                                 }
                             })
@@ -180,7 +181,12 @@ struct PlayerView: View {
                     }
                     .padding(.horizontal, 30)
                     .onChange(of: playerManager.currentTime) { newValue in
-                        if !isDraggingSlider {
+                        if isDraggingSlider {
+                            // 如果播放器的新时间已经接近我们设置的时间，就认为 seek 完成
+                            if abs(localTime - newValue) < 0.5 {
+                                isDraggingSlider = false
+                            }
+                        } else {
                             localTime = newValue
                         }
                     }

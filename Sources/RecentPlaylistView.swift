@@ -107,7 +107,8 @@ struct RecentPlaylistView: View {
                 imageUrl: entity.imageUrl,
                 audioUrl: entity.audioUrl,
                 lrcUrl: entity.lrcUrl,
-                lrc: entity.lrc
+                lrc: entity.lrc,
+                sourceUrl: entity.audioUrl
             )
         }
         
@@ -125,7 +126,8 @@ struct RecentPlaylistView: View {
                         imageUrl: targetTrack.imageUrl,
                         audioUrl: realUrl,
                         lrcUrl: targetTrack.lrcUrl,
-                        lrc: targetTrack.lrc
+                        lrc: targetTrack.lrc,
+                        sourceUrl: targetTrack.sourceUrl ?? targetTrack.audioUrl
                     )
                     playableTracks[index] = updatedTrack
                     

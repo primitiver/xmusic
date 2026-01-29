@@ -142,7 +142,8 @@ struct DetailListView: View {
                     imageUrl: item.absoluteCover,
                     audioUrl: audioUrl,
                     lrcUrl: item.absoluteLrc,
-                    lrc: nil
+                    lrc: nil,
+                    sourceUrl: item.absoluteUrl
                 )
                 playerManager.play(track: track)
                 saveToRecent(track, originalUrl: item.absoluteUrl)

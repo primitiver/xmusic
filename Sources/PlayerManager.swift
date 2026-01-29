@@ -37,6 +37,7 @@ class PlayerManager: ObservableObject {
         let audioUrl: String
         var lrcUrl: String?
         var lrc: String?
+        var sourceUrl: String?
     }
     
     init() {
@@ -86,21 +87,46 @@ class PlayerManager: ObservableObject {
     }
     
     func play(track: MusicTrack) {
-        guard let url = URL(string: track.audioUrl) else { 
-            print("❌ [Player] Invalid audio URL: \(track.audioUrl)")
-            return 
+        // Reset state for new track
+        self.currentTime = 0
+        self.duration = 0
+        self.bufferedTime = 0
+        
+        let playUrl: URL
+        let isLocal: Bool
+        
+        // 1. Check local cache
+        if let cachedUrl = MusicCacheManager.shared.cachedURL(for: track.id) {
+            print("💾 [Player] Hit cache: \(track.name)")
+            playUrl = cachedUrl
+            isLocal = true
+        } else {
+            // 2. Use remote URL
+            guard let url = URL(string: track.audioUrl) else { 
+                print("❌ [Player] Invalid audio URL: \(track.audioUrl)")
+                return 
+            }
+            playUrl = url
+            isLocal = false
+            print("🎵 [Player] Resolved Audio URL: \(track.audioUrl)")
+            
+            // 3. Start caching in background if not local
+            MusicCacheManager.shared.startCaching(url: track.audioUrl, id: track.id)
         }
         
         if let timeObserver = timeObserver {
             player?.removeTimeObserver(timeObserver)
         }
-        
-        print("🎵 [Player] Resolved Audio URL: \(track.audioUrl)")
+
         let headers: [String: String] = [
             "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
             "Referer": "https://www.jbsou.cn/"
         ]
-        let asset = AVURLAsset(url: url, options: ["AVURLAssetHTTPHeaderFieldsKey": headers])
+        
+        // For local files, we don't need custom headers typically, but AVURLAsset handles file URLs fine.
+        let assetOptions = isLocal ? nil : ["AVURLAssetHTTPHeaderFieldsKey": headers]
+        let asset = AVURLAsset(url: playUrl, options: assetOptions)
+        
         let playerItem = AVPlayerItem(asset: asset)
         player = AVPlayer(playerItem: playerItem)
         currentTrack = track
@@ -109,7 +135,7 @@ class PlayerManager: ObservableObject {
             self.lyrics = trackLrc
         }
         
-        print("🎵 [Player] Ready to play: \(track.name)")
+        print("🎵 [Player] Ready to play: \(track.name) (Local: \(isLocal))")
         
         // Monitor item status
         playerItem.publisher(for: \.status)
@@ -146,6 +172,14 @@ class PlayerManager: ObservableObject {
             }
             .store(in: &cancellables)
         
+        // Listen for playback completion
+        NotificationCenter.default.publisher(for: .AVPlayerItemDidPlayToEndTime, object: playerItem)
+            .sink { [weak self] _ in
+                print("🏁 [Player] Track finished playing")
+                self?.handleTrackFinished()
+            }
+            .store(in: &cancellables)
+        
         playerItem.publisher(for: \.duration)
             .sink { [weak self] duration in
                 let secs = duration.seconds.isNaN ? 0 : duration.seconds
@@ -168,6 +202,35 @@ class PlayerManager: ObservableObject {
     }
     
     func togglePlayPause() {
+        if player == nil, let track = currentTrack {
+            // Player not initialized (e.g., after app restart)
+            // Try to resolve URL and play
+            print("🔄 [Player] Restoring playback for: \(track.name)")
+            
+            // Use sourceUrl if available, otherwise fallback to audioUrl
+            let urlToResolve = track.sourceUrl ?? track.audioUrl
+            
+            MusicApiService.shared.resolvePlayUrl(url: urlToResolve) { [weak self] resolvedUrl in
+                guard let self = self, let url = resolvedUrl else { return }
+                
+                DispatchQueue.main.async {
+                    let freshTrack = MusicTrack(
+                        id: track.id,
+                        name: track.name,
+                        singer: track.singer,
+                        albumName: track.albumName,
+                        imageUrl: track.imageUrl,
+                        audioUrl: url,
+                        lrcUrl: track.lrcUrl,
+                        lrc: track.lrc,
+                        sourceUrl: track.sourceUrl ?? track.audioUrl
+                    )
+                    self.play(track: freshTrack)
+                }
+            }
+            return
+        }
+        
         if isPlaying {
             player?.pause()
         } else {
@@ -265,13 +328,86 @@ class PlayerManager: ObservableObject {
     func playNext() {
         guard !currentPlaylist.isEmpty else { return }
         currentIndex = (currentIndex + 1) % currentPlaylist.count
-        play(track: currentPlaylist[currentIndex])
+        resolveAndPlay(track: currentPlaylist[currentIndex])
     }
     
     func playPrevious() {
         guard !currentPlaylist.isEmpty else { return }
         currentIndex = currentIndex > 0 ? currentIndex - 1 : currentPlaylist.count - 1
-        play(track: currentPlaylist[currentIndex])
+        resolveAndPlay(track: currentPlaylist[currentIndex])
+    }
+    
+    // Helper to resolve URL before playing
+    private func resolveAndPlay(track: MusicTrack) {
+        // 1. Check if already cached locally
+        if MusicCacheManager.shared.isCached(id: track.id), let cachedUrl = MusicCacheManager.shared.cachedURL(for: track.id) {
+             print("💾 [Player] Auto-play hit cache: \(track.name)")
+             // Create a track instance pointing to local file
+             // We can skip resolution because we have the file
+             DispatchQueue.main.async {
+                 let localTrack = MusicTrack(
+                     id: track.id,
+                     name: track.name,
+                     singer: track.singer,
+                     albumName: track.albumName,
+                     imageUrl: track.imageUrl,
+                     audioUrl: cachedUrl.absoluteString,
+                     lrcUrl: track.lrcUrl,
+                     lrc: track.lrc,
+                     sourceUrl: track.sourceUrl
+                 )
+                 self.play(track: localTrack)
+             }
+             return
+        }
+        
+        // 2. Not cached, resolve remote URL
+        let urlToResolve = track.sourceUrl ?? track.audioUrl
+        
+        MusicApiService.shared.resolvePlayUrl(url: urlToResolve) { [weak self] resolvedUrl in
+            guard let self = self, let url = resolvedUrl else { return }
+            
+            DispatchQueue.main.async {
+                // Create a new track with the resolved audio URL
+                let updatedTrack = MusicTrack(
+                    id: track.id,
+                    name: track.name,
+                    singer: track.singer,
+                    albumName: track.albumName,
+                    imageUrl: track.imageUrl,
+                    audioUrl: url,
+                    lrcUrl: track.lrcUrl,
+                    lrc: track.lrc,
+                    sourceUrl: track.sourceUrl ?? track.audioUrl
+                )
+                
+                self.play(track: updatedTrack)
+                
+                 // If we have missing lyric content but have a URL, fetch it now too
+                if updatedTrack.lrc == nil, let lrcUrl = updatedTrack.lrcUrl {
+                    MusicApiService.shared.fetchLyric(lrcUrl: lrcUrl) { lrc in
+                        if let lyric = lrc {
+                            DispatchQueue.main.async {
+                                self.lyrics = lyric
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+    
+    private func handleTrackFinished() {
+        guard !currentPlaylist.isEmpty else { return }
+        
+        if currentIndex < currentPlaylist.count - 1 {
+            // Has next track
+            playNext()
+        } else {
+            // End of playlist, loop back to start
+            currentIndex = 0
+            resolveAndPlay(track: currentPlaylist[0])
+        }
     }
     
     func canPlayNext() -> Bool {

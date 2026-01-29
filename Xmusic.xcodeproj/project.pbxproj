@@ -8,6 +8,7 @@
 
 /* Begin PBXFileReference section */
 		BE4DE3CE2F28984700769CE5 /* Xmusic.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = Xmusic.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		BE5C29D42F2AEE0D003C059C /* Xmusic-Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = "Xmusic-Info.plist"; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedRootGroup section */
@@ -32,6 +33,7 @@
 		BE4DE3C52F28984600769CE5 = {
 			isa = PBXGroup;
 			children = (
+				BE5C29D42F2AEE0D003C059C /* Xmusic-Info.plist */,
 				BE4DE40B2F2898DE00769CE5 /* Sources */,
 				BE4DE3CF2F28984700769CE5 /* Products */,
 			);
@@ -256,6 +258,7 @@
 				DEVELOPMENT_TEAM = 69Y7Z962RJ;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = "Xmusic-Info.plist";
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
 				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
 				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
@@ -288,6 +291,7 @@
 				DEVELOPMENT_TEAM = 69Y7Z962RJ;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = "Xmusic-Info.plist";
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
 				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
 				INFOPLIST_KEY_UILaunchScreen_Generation = YES;

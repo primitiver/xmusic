@@ -236,7 +236,8 @@ struct HomeView: View {
                     imageUrl: item.absoluteCover,
                     audioUrl: audioUrl,
                     lrcUrl: item.absoluteLrc,
-                    lrc: nil
+                    lrc: nil,
+                    sourceUrl: item.absoluteUrl
                 )
                 playerManager.play(track: track)
                 // Save the original source URL (item.absoluteUrl) for persistence, 
@@ -268,7 +269,8 @@ struct HomeView: View {
                 imageUrl: entity.imageUrl,
                 audioUrl: entity.audioUrl,
                 lrcUrl: entity.lrcUrl,
-                lrc: entity.lrc
+                lrc: entity.lrc,
+                sourceUrl: entity.audioUrl
             )
         }
         
@@ -288,7 +290,8 @@ struct HomeView: View {
                         imageUrl: targetTrack.imageUrl,
                         audioUrl: realUrl,
                         lrcUrl: targetTrack.lrcUrl,
-                        lrc: targetTrack.lrc
+                        lrc: targetTrack.lrc,
+                        sourceUrl: item.audioUrl
                     )
                     playableTracks[index] = updatedTrack
                     
@@ -510,7 +513,8 @@ struct SearchView: View {
                     imageUrl: item.absoluteCover,
                     audioUrl: audioUrl,
                     lrcUrl: item.absoluteLrc,
-                    lrc: nil
+                    lrc: nil,
+                    sourceUrl: item.absoluteUrl
                 )
                 playerManager.play(track: track)
                 saveToRecent(track, originalUrl: item.absoluteUrl)
@@ -598,8 +602,27 @@ struct LibraryView: View {
     @Environment(\.modelContext) private var modelContext
     @EnvironmentObject var playerManager: PlayerManager
     
+    @StateObject private var cacheManager = MusicCacheManager.shared
+    
     var body: some View {
         List {
+            // Cache Management Section
+            Section(header: Text("存储空间")) {
+                HStack {
+                    Text("缓存占用")
+                    Spacer()
+                    Text(cacheManager.cacheSizeString)
+                        .foregroundColor(.secondary)
+                }
+                
+                Button(action: {
+                    cacheManager.clearCache()
+                    HapticManager.shared.notification(type: .success)
+                }) {
+                    Text("清除缓存")
+                        .foregroundColor(.red)
+                }
+            }
             
             Section(header: Text("我的收藏")) {
                 if favorites.isEmpty {
@@ -666,7 +689,8 @@ struct LibraryView: View {
                     imageUrl: item.imageUrl,
                     audioUrl: audioUrl,
                     lrcUrl: item.lrcUrl,
-                    lrc: item.lrc
+                    lrc: item.lrc,
+                    sourceUrl: item.audioUrl
                 )
                 playerManager.play(track: track)
                 
