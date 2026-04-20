@@ -21,6 +21,21 @@ class PlayerManager: ObservableObject {
     @Published var parsedLyrics: [LyricLine] = []
     @Published var currentPlaylist: [MusicTrack] = []
     @Published var currentIndex: Int = 0
+    @Published var playMode: PlayMode = .sequential {
+        didSet {
+            UserDefaults.standard.set(playMode.rawValue, forKey: "playMode")
+            updateRemoteCommandCenter()
+        }
+    }
+
+    enum PlayMode: String, CaseIterable {
+        case sequential    // 顺序播放
+        case loopAll      // 列表循环
+        case loopOne      // 单曲循环
+        case shuffle      // 随机播放
+    }
+
+    private var shuffledIndices: [Int] = []
     
     struct LyricLine: Identifiable {
         let id = UUID()
@@ -44,6 +59,14 @@ class PlayerManager: ObservableObject {
         setupAudioSession()
         setupRemoteCommandCenter()
         loadLastPlayedTrack()
+        loadPlayMode()
+    }
+
+    private func loadPlayMode() {
+        if let rawValue = UserDefaults.standard.string(forKey: "playMode"),
+           let mode = PlayMode(rawValue: rawValue) {
+            playMode = mode
+        }
     }
     
     private func setupAudioSession() {
@@ -250,17 +273,17 @@ class PlayerManager: ObservableObject {
     
     private func setupRemoteCommandCenter() {
         let commandCenter = MPRemoteCommandCenter.shared()
-        
+
         commandCenter.playCommand.addTarget { [weak self] _ in
             self?.togglePlayPause()
             return .success
         }
-        
+
         commandCenter.pauseCommand.addTarget { [weak self] _ in
             self?.togglePlayPause()
             return .success
         }
-        
+
         commandCenter.changePlaybackPositionCommand.addTarget { [weak self] event in
             if let positionEvent = event as? MPChangePlaybackPositionCommandEvent {
                 self?.seek(to: positionEvent.positionTime)
@@ -268,6 +291,22 @@ class PlayerManager: ObservableObject {
             }
             return .commandFailed
         }
+
+        commandCenter.nextTrackCommand.addTarget { [weak self] _ in
+            self?.playNext()
+            return .success
+        }
+
+        commandCenter.previousTrackCommand.addTarget { [weak self] _ in
+            self?.playPrevious()
+            return .success
+        }
+    }
+
+    private func updateRemoteCommandCenter() {
+        // Update remote command center for play mode changes
+        MPRemoteCommandCenter.shared().nextTrackCommand.isEnabled = canPlayNext()
+        MPRemoteCommandCenter.shared().previousTrackCommand.isEnabled = canPlayPrevious()
     }
     
     private func updateNowPlayingInfo() {
@@ -315,26 +354,103 @@ class PlayerManager: ObservableObject {
         return lines.sorted { $0.time < $1.time }
     }
     
-    // MARK: - Playlist Management
-    
+    // MARK: - Playlist Management (Recent-track based)
+
+    /// Sync the current playlist from the recent track entities.
+    /// Call this from HomeView before playNext/Previous to ensure consistency.
+    /// Toggle through play modes: sequential -> loopAll -> loopOne -> shuffle -> sequential
+    func togglePlayMode() {
+        if let index = PlayMode.allCases.firstIndex(of: playMode) {
+            let nextIndex = (index + 1) % PlayMode.allCases.count
+            playMode = PlayMode.allCases[nextIndex]
+        }
+    }
+
+    func setPlaylistFromRecent(_ entities: [RecentTrackEntity]) {
+        currentPlaylist = entities.map { entity in
+            MusicTrack(
+                id: entity.id,
+                name: entity.name,
+                singer: entity.singer,
+                albumName: entity.albumName,
+                imageUrl: entity.imageUrl,
+                audioUrl: entity.audioUrl,
+                lrcUrl: entity.lrcUrl,
+                lrc: entity.lrc,
+                sourceUrl: entity.audioUrl
+            )
+        }
+        if let track = currentTrack,
+           let idx = currentPlaylist.firstIndex(where: { $0.id == track.id }) {
+            currentIndex = idx
+        } else {
+            currentIndex = 0
+        }
+        generateShuffledIndices()
+    }
+
     func setPlaylist(tracks: [MusicTrack], startIndex: Int = 0) {
         currentPlaylist = tracks
         currentIndex = startIndex
+        generateShuffledIndices()
         if startIndex < tracks.count {
             play(track: tracks[startIndex])
         }
     }
-    
+
+    private func generateShuffledIndices() {
+        let count = currentPlaylist.count
+        shuffledIndices = Array(0..<count).shuffled()
+    }
+
     func playNext() {
         guard !currentPlaylist.isEmpty else { return }
-        currentIndex = (currentIndex + 1) % currentPlaylist.count
-        resolveAndPlay(track: currentPlaylist[currentIndex])
+        switch playMode {
+        case .sequential, .loopOne:
+            if currentIndex < currentPlaylist.count - 1 {
+                currentIndex += 1
+                resolveAndPlay(track: currentPlaylist[currentIndex])
+            }
+        case .loopAll:
+            currentIndex = (currentIndex + 1) % currentPlaylist.count
+            resolveAndPlay(track: currentPlaylist[currentIndex])
+        case .shuffle:
+            playNextInShuffle()
+        }
     }
-    
+
     func playPrevious() {
         guard !currentPlaylist.isEmpty else { return }
-        currentIndex = currentIndex > 0 ? currentIndex - 1 : currentPlaylist.count - 1
-        resolveAndPlay(track: currentPlaylist[currentIndex])
+        switch playMode {
+        case .sequential, .loopAll, .loopOne:
+            currentIndex = currentIndex > 0 ? currentIndex - 1 : currentPlaylist.count - 1
+            resolveAndPlay(track: currentPlaylist[currentIndex])
+        case .shuffle:
+            playPreviousInShuffle()
+        }
+    }
+
+    private func playNextInShuffle() {
+        guard let currentIndex = shuffledIndices.firstIndex(of: currentIndex) else {
+            // Current index not in shuffle list, regenerate
+            generateShuffledIndices()
+            return playNextInShuffle()
+        }
+        let nextShuffleIndex = (currentIndex + 1) % shuffledIndices.count
+        let trackIndex = shuffledIndices[nextShuffleIndex]
+        self.currentIndex = trackIndex
+        resolveAndPlay(track: currentPlaylist[trackIndex])
+    }
+
+    private func playPreviousInShuffle() {
+        guard let currentIndex = shuffledIndices.firstIndex(of: currentIndex) else {
+            generateShuffledIndices()
+            return playPreviousInShuffle()
+        }
+        let prevShuffleIndex = currentIndex > 0 ? currentIndex - 1 : shuffledIndices.count - 1
+        let trackIndex = shuffledIndices[prevShuffleIndex]
+        self.currentIndex = trackIndex
+        resolveAndPlay(track: currentPlaylist[trackIndex])
     }
     
     // Helper to resolve URL before playing
@@ -399,22 +515,26 @@ class PlayerManager: ObservableObject {
     
     private func handleTrackFinished() {
         guard !currentPlaylist.isEmpty else { return }
-        
-        if currentIndex < currentPlaylist.count - 1 {
-            // Has next track
+
+        switch playMode {
+        case .sequential:
+            if currentIndex < currentPlaylist.count - 1 {
+                playNext()
+            }
+        case .loopAll:
             playNext()
-        } else {
-            // End of playlist, loop back to start
-            currentIndex = 0
-            resolveAndPlay(track: currentPlaylist[0])
+        case .loopOne:
+            resolveAndPlay(track: currentPlaylist[currentIndex])
+        case .shuffle:
+            playNextInShuffle()
         }
     }
-    
+
     func canPlayNext() -> Bool {
-        !currentPlaylist.isEmpty && currentIndex < currentPlaylist.count - 1
+        !currentPlaylist.isEmpty && (playMode == .loopAll || playMode == .loopOne || playMode == .shuffle || currentIndex < currentPlaylist.count - 1)
     }
-    
+
     func canPlayPrevious() -> Bool {
-        !currentPlaylist.isEmpty && currentIndex > 0
+        !currentPlaylist.isEmpty
     }
 }

@@ -6,6 +6,7 @@ struct PlayerView: View {
     @Environment(\.dismiss) var dismiss
     @Environment(\.modelContext) private var modelContext
     @Query var favorites: [MusicTrackEntity]
+    @Query(sort: \RecentTrackEntity.lastPlayed, order: .reverse) var recentTracks: [RecentTrackEntity]
     @State private var showingLyrics = false
     @State private var localTime: Double = 0
     @State private var isDraggingSlider = false
@@ -44,13 +45,6 @@ struct PlayerView: View {
                         .font(.headline)
                     
                     Spacer()
-                    
-                    
-                    Button(action: { showingRecentList = true }) {
-                        Image(systemName: "list.bullet")
-                            .font(.title2)
-                    }
-                    .frame(width: 44, height: 44)
                 }
                 .padding(.horizontal)
                 .foregroundColor(.white)
@@ -137,7 +131,7 @@ struct PlayerView: View {
                                 .lineLimit(1)
                         }
                         Spacer()
-                        
+
                         if let track = playerManager.currentTrack {
                             Button(action: {
                                 toggleFavorite(track)
@@ -145,6 +139,13 @@ struct PlayerView: View {
                                 Image(systemName: isFavorite(track.id) ? "heart.fill" : "heart")
                                     .font(.title2)
                                     .foregroundColor(isFavorite(track.id) ? .red : .white)
+                            }
+
+                            // Recent Playlist Button
+                            Button(action: { showingRecentList = true }) {
+                                Image(systemName: "list.bullet")
+                                    .font(.title2)
+                                    .foregroundColor(.white)
                             }
                         }
                     }
@@ -176,6 +177,16 @@ struct PlayerView: View {
                             Spacer()
                             Text(formatTime(playerManager.duration))
                         }
+
+                        // Play Mode Button - Right aligned above controls
+                        Button(action: {
+                            playerManager.togglePlayMode()
+                            HapticManager.shared.selection()
+                        }) {
+                            Image(systemName: playModeIcon)
+                                .font(.body)
+                                .foregroundColor(.white.opacity(0.7))
+                        }
                         .font(.caption2)
                         .foregroundColor(.white.opacity(0.7))
                     }
@@ -192,7 +203,7 @@ struct PlayerView: View {
                     }
                     
                     // Main Controls
-                    HStack(spacing: 60) {
+                    HStack(spacing: 40) {
                         Button(action: {
                             playerManager.playPrevious()
                             HapticManager.shared.selection()
@@ -200,6 +211,7 @@ struct PlayerView: View {
                             Image(systemName: "backward.fill")
                                 .font(.title)
                                 .foregroundColor(playerManager.canPlayPrevious() ? .white : .gray)
+                                .frame(width: 44, height: 44)
                         }
                         .disabled(!playerManager.canPlayPrevious())
                         
@@ -230,6 +242,10 @@ struct PlayerView: View {
         .sheet(isPresented: $showingRecentList) {
             RecentPlaylistView()
                 .environmentObject(playerManager)
+        }
+        .onAppear {
+            // Sync playlist whenever full player appears
+            playerManager.setPlaylistFromRecent(recentTracks)
         }
     }
     
@@ -262,7 +278,16 @@ struct PlayerView: View {
     }
     
     // MARK: - Lyric Helpers
-    
+
+    private var playModeIcon: String {
+        switch playerManager.playMode {
+        case .sequential: return "list.bullet"
+        case .loopAll:    return "repeat"
+        case .loopOne:    return "repeat.1"
+        case .shuffle:    return "shuffle"
+        }
+    }
+
     private func isCurrentLine(_ line: PlayerManager.LyricLine) -> Bool {
         guard let index = playerManager.parsedLyrics.firstIndex(where: { $0.id == line.id }) else { return false }
         let currentTime = playerManager.currentTime

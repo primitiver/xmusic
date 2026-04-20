@@ -170,7 +170,7 @@ struct HomeView: View {
                             HStack {
                                 Button(action: {
                                     HapticManager.shared.selection()
-                                    playTrack(item)
+                                    playTrack(item, from: recommendedTracks)
                                 }) {
                                     HStack(spacing: 15) {
                                         AsyncImage(url: URL(string: item.absoluteCover)) { image in
@@ -223,10 +223,10 @@ struct HomeView: View {
         }
     }
     
-    private func playTrack(_ item: MusicApiService.MusicItem) {
+    private func playTrack(_ item: MusicApiService.MusicItem, from list: [MusicApiService.MusicItem]) {
         MusicApiService.shared.resolvePlayUrl(url: item.absoluteUrl) { url in
             guard let audioUrl = url else { return }
-            
+
             DispatchQueue.main.async {
                 let track = PlayerManager.MusicTrack(
                     id: item.id,
@@ -240,11 +240,12 @@ struct HomeView: View {
                     sourceUrl: item.absoluteUrl
                 )
                 playerManager.play(track: track)
-                // Save the original source URL (item.absoluteUrl) for persistence, 
-                // so we can re-resolve it later (e.g. from Recent or Favorites)
+                // Sync playlist to recent tracks so next/previous buttons use the same data
+                playerManager.setPlaylistFromRecent(self.recentTracks)
                 saveToRecent(track, originalUrl: item.absoluteUrl)
-                
-                // Fetch lyric too
+                // Update again after saving so the newly played track is included
+                playerManager.setPlaylistFromRecent(self.recentTracks)
+
                 MusicApiService.shared.fetchLyric(lrcUrl: item.absoluteLrc) { lrc in
                     if let lyric = lrc {
                         DispatchQueue.main.async {
@@ -252,6 +253,7 @@ struct HomeView: View {
                             var updated = track
                             updated.lrc = lyric
                             saveToRecent(updated, originalUrl: item.absoluteUrl)
+                            playerManager.setPlaylistFromRecent(self.recentTracks)
                         }
                     }
                 }
@@ -273,15 +275,12 @@ struct HomeView: View {
                 sourceUrl: entity.audioUrl
             )
         }
-        
+
         if let index = tracks.firstIndex(where: { $0.id == item.id }) {
-            // Resolve the target track's URL because Recent list might store unresolved source URLs
             let targetTrack = tracks[index]
             MusicApiService.shared.resolvePlayUrl(url: targetTrack.audioUrl) { url in
                 guard let realUrl = url else { return }
                 DispatchQueue.main.async {
-                    var playableTracks = tracks
-                    // Update the target track with the fresh resolved URL
                     let updatedTrack = PlayerManager.MusicTrack(
                         id: targetTrack.id,
                         name: targetTrack.name,
@@ -293,13 +292,11 @@ struct HomeView: View {
                         lrc: targetTrack.lrc,
                         sourceUrl: item.audioUrl
                     )
-                    playableTracks[index] = updatedTrack
-                    
-                    self.playerManager.setPlaylist(tracks: playableTracks, startIndex: index)
-                    // Update recent time, keeping the original URL (which is in item.audioUrl)
+                    self.playerManager.play(track: updatedTrack)
                     self.saveToRecent(updatedTrack, originalUrl: item.audioUrl)
-                    
-                    // If content missing but URL exists, fetch it
+                    // Sync playlist to recent tracks
+                    self.playerManager.setPlaylistFromRecent(self.recentTracks)
+
                     if item.lrc == nil, let lrcUrl = item.lrcUrl {
                         MusicApiService.shared.fetchLyric(lrcUrl: lrcUrl) { lrc in
                             if let lyric = lrc {
@@ -308,6 +305,7 @@ struct HomeView: View {
                                     var withLyric = updatedTrack
                                     withLyric.lrc = lyric
                                     self.saveToRecent(withLyric, originalUrl: item.audioUrl)
+                                    self.playerManager.setPlaylistFromRecent(self.recentTracks)
                                 }
                             }
                         }
@@ -346,10 +344,11 @@ struct SearchView: View {
     @State private var currentPage = 1
     @State private var isFetching = false
     @State private var canLoadMore = true
-    
+
     @EnvironmentObject var playerManager: PlayerManager
     @Environment(\.modelContext) private var modelContext
     @Query var favorites: [MusicTrackEntity]
+    @Query(sort: \RecentTrackEntity.lastPlayed, order: .reverse) var recentTracks: [RecentTrackEntity]
     
     var body: some View {
         VStack(spacing: 0) {
@@ -501,9 +500,28 @@ struct SearchView: View {
     }
     
     private func playTrack(_ item: MusicApiService.MusicItem) {
+        // Build playlist from current search results
+        let playlist = results.map { apiItem in
+            PlayerManager.MusicTrack(
+                id: apiItem.id,
+                name: apiItem.name,
+                singer: apiItem.artist,
+                albumName: nil,
+                imageUrl: apiItem.absoluteCover,
+                audioUrl: apiItem.absoluteUrl,
+                lrcUrl: apiItem.absoluteLrc,
+                lrc: nil,
+                sourceUrl: apiItem.absoluteUrl
+            )
+        }
+
+        if let index = playlist.firstIndex(where: { $0.id == item.id }) {
+            playerManager.setPlaylist(tracks: playlist, startIndex: index)
+        }
+
         MusicApiService.shared.resolvePlayUrl(url: item.absoluteUrl) { url in
             guard let audioUrl = url else { return }
-            
+
             DispatchQueue.main.async {
                 let track = PlayerManager.MusicTrack(
                     id: item.id,
@@ -516,18 +534,21 @@ struct SearchView: View {
                     lrc: nil,
                     sourceUrl: item.absoluteUrl
                 )
-                playerManager.play(track: track)
+                if self.playerManager.currentPlaylist.isEmpty {
+                    self.playerManager.play(track: track)
+                }
                 saveToRecent(track, originalUrl: item.absoluteUrl)
-                
-                // Fetch lyric
+                // Sync playlist to recent tracks
+                playerManager.setPlaylistFromRecent(self.recentTracks)
+
                 MusicApiService.shared.fetchLyric(lrcUrl: item.absoluteLrc) { lrc in
                     if let lyric = lrc {
                         DispatchQueue.main.async {
                             playerManager.lyrics = lyric
-                            // Update the track in player and save with content
                             var updatedTrack = track
                             updatedTrack.lrc = lyric
                             saveToRecent(updatedTrack, originalUrl: item.absoluteUrl)
+                            playerManager.setPlaylistFromRecent(self.recentTracks)
                         }
                     } else {
                         DispatchQueue.main.async {
@@ -599,6 +620,7 @@ struct SearchView: View {
 
 struct LibraryView: View {
     @Query(sort: \MusicTrackEntity.timestamp, order: .reverse) var favorites: [MusicTrackEntity]
+    @Query(sort: \RecentTrackEntity.lastPlayed, order: .reverse) var recentTracks: [RecentTrackEntity]
     @Environment(\.modelContext) private var modelContext
     @EnvironmentObject var playerManager: PlayerManager
     
@@ -679,7 +701,7 @@ struct LibraryView: View {
         // Resolve the URL before playback to ensure it's fresh/valid
         MusicApiService.shared.resolvePlayUrl(url: item.audioUrl) { url in
             guard let audioUrl = url else { return }
-            
+
             DispatchQueue.main.async {
                 let track = PlayerManager.MusicTrack(
                     id: item.id,
@@ -693,14 +715,15 @@ struct LibraryView: View {
                     sourceUrl: item.audioUrl
                 )
                 playerManager.play(track: track)
-                
+                // Sync playlist to recent tracks
+                playerManager.setPlaylistFromRecent(self.recentTracks)
+
                 // If content is missing but URL exists, fetch it
                 if item.lrc == nil, let lrcUrl = item.lrcUrl {
                      MusicApiService.shared.fetchLyric(lrcUrl: lrcUrl) { lrc in
                         if let lyric = lrc {
                             DispatchQueue.main.async {
                                 playerManager.lyrics = lyric
-                                // Optionally update entity with content
                                 item.lrc = lyric
                             }
                         }
@@ -721,6 +744,7 @@ struct LibraryView: View {
 
 struct MiniPlayerView: View {
     @EnvironmentObject var playerManager: PlayerManager
+    @Query(sort: \RecentTrackEntity.lastPlayed, order: .reverse) var recentTracks: [RecentTrackEntity]
     
     var body: some View {
         VStack(spacing: 0) {
@@ -808,6 +832,16 @@ struct MiniPlayerView: View {
                             .foregroundColor(playerManager.canPlayNext() ? .primary : .secondary.opacity(0.3))
                     }
                     .disabled(!playerManager.canPlayNext())
+
+                    // Play Mode Button
+                    Button(action: {
+                        playerManager.togglePlayMode()
+                        HapticManager.shared.selection()
+                    }) {
+                        Image(systemName: playModeIcon)
+                            .font(.body)
+                            .foregroundColor(.primary)
+                    }
                 }
                 .padding(.trailing, 5)
             }
@@ -832,12 +866,25 @@ struct MiniPlayerView: View {
         .clipShape(RoundedRectangle(cornerRadius: 12))
         .padding(.horizontal)
         .shadow(color: Color.black.opacity(0.1), radius: 10, y: 5)
+        .onAppear {
+            // Sync playlist whenever mini player appears (handles recent list changes)
+            playerManager.setPlaylistFromRecent(recentTracks)
+        }
     }
     
     private func formatTime(_ seconds: Double) -> String {
         let mins = Int(seconds) / 60
         let secs = Int(seconds) % 60
         return String(format: "%d:%02d", mins, secs)
+    }
+
+    private var playModeIcon: String {
+        switch playerManager.playMode {
+        case .sequential: return "list.bullet"
+        case .loopAll:    return "repeat"
+        case .loopOne:    return "repeat.1"
+        case .shuffle:    return "shuffle"
+        }
     }
 }
 

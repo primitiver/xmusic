@@ -98,26 +98,11 @@ struct RecentPlaylistView: View {
     }
     
     private func playFromList(_ item: RecentTrackEntity) {
-        let tracks = recentTracks.map { entity in
-            PlayerManager.MusicTrack(
-                id: entity.id,
-                name: entity.name,
-                singer: entity.singer,
-                albumName: entity.albumName,
-                imageUrl: entity.imageUrl,
-                audioUrl: entity.audioUrl,
-                lrcUrl: entity.lrcUrl,
-                lrc: entity.lrc,
-                sourceUrl: entity.audioUrl
-            )
-        }
-        
-        if let index = tracks.firstIndex(where: { $0.id == item.id }) {
-            let targetTrack = tracks[index]
+        if let index = recentTracks.firstIndex(where: { $0.id == item.id }) {
+            let targetTrack = recentTracks[index]
             MusicApiService.shared.resolvePlayUrl(url: targetTrack.audioUrl) { url in
                 guard let realUrl = url else { return }
                 DispatchQueue.main.async {
-                    var playableTracks = tracks
                     let updatedTrack = PlayerManager.MusicTrack(
                         id: targetTrack.id,
                         name: targetTrack.name,
@@ -127,21 +112,23 @@ struct RecentPlaylistView: View {
                         audioUrl: realUrl,
                         lrcUrl: targetTrack.lrcUrl,
                         lrc: targetTrack.lrc,
-                        sourceUrl: targetTrack.sourceUrl ?? targetTrack.audioUrl
+                        sourceUrl: targetTrack.audioUrl
                     )
-                    playableTracks[index] = updatedTrack
-                    
-                    self.playerManager.setPlaylist(tracks: playableTracks, startIndex: index)
+                    self.playerManager.play(track: updatedTrack)
+                    // Sync playlist to recent tracks
+                    self.playerManager.setPlaylistFromRecent(self.recentTracks)
                 }
             }
         }
-        
+
         dismiss()
     }
     
     private func deleteRecent(_ item: RecentTrackEntity) {
         withAnimation {
             modelContext.delete(item)
+            // Also update the player's playlist
+            playerManager.setPlaylistFromRecent(recentTracks.filter { $0.id != item.id })
         }
     }
     
