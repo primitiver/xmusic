@@ -177,18 +177,6 @@ struct PlayerView: View {
                             Spacer()
                             Text(formatTime(playerManager.duration))
                         }
-
-                        // Play Mode Button - Right aligned above controls
-                        Button(action: {
-                            playerManager.togglePlayMode()
-                            HapticManager.shared.selection()
-                        }) {
-                            Image(systemName: playModeIcon)
-                                .font(.body)
-                                .foregroundColor(.white.opacity(0.7))
-                        }
-                        .font(.caption2)
-                        .foregroundColor(.white.opacity(0.7))
                     }
                     .padding(.horizontal, 30)
                     .onChange(of: playerManager.currentTime) { newValue in
@@ -203,7 +191,18 @@ struct PlayerView: View {
                     }
                     
                     // Main Controls
-                    HStack(spacing: 40) {
+                    HStack(spacing: 25) {
+                        // Play Mode Button - Left side
+                        Button(action: {
+                            playerManager.togglePlayMode()
+                            HapticManager.shared.selection()
+                        }) {
+                            Image(systemName: playModeIcon)
+                                .font(.body)
+                                .foregroundColor(.white.opacity(0.7))
+                                .frame(width: 44, height: 44)
+                        }
+
                         Button(action: {
                             playerManager.playPrevious()
                             HapticManager.shared.selection()
@@ -214,15 +213,15 @@ struct PlayerView: View {
                                 .frame(width: 44, height: 44)
                         }
                         .disabled(!playerManager.canPlayPrevious())
-                        
-                        Button(action: { 
+
+                        Button(action: {
                             playerManager.togglePlayPause()
                             HapticManager.shared.selection()
                         }) {
                             Image(systemName: playerManager.isPlaying ? "pause.circle.fill" : "play.circle.fill")
                                 .font(.system(size: 70))
                         }
-                        
+
                         Button(action: {
                             playerManager.playNext()
                             HapticManager.shared.selection()
@@ -232,6 +231,17 @@ struct PlayerView: View {
                                 .foregroundColor(playerManager.canPlayNext() ? .white : .gray)
                         }
                         .disabled(!playerManager.canPlayNext())
+
+                        // Recent List Button - Right side
+                        Button(action: {
+                            showingRecentList = true
+                            HapticManager.shared.selection()
+                        }) {
+                            Image(systemName: "clock.arrow.circlepath")
+                                .font(.body)
+                                .foregroundColor(.white.opacity(0.7))
+                                .frame(width: 44, height: 44)
+                        }
                     }
                     .padding(.bottom, 50)
                 }

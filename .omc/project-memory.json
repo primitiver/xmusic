@@ -71,56 +71,68 @@
   "hotPaths": [
     {
       "path": "Sources/MusicApiService.swift",
-      "accessCount": 160,
-      "lastAccessed": 1776772648321,
+      "accessCount": 186,
+      "lastAccessed": 1776818009316,
       "type": "file"
     },
     {
       "path": "Sources/ContentView.swift",
-      "accessCount": 29,
-      "lastAccessed": 1776773054367,
+      "accessCount": 79,
+      "lastAccessed": 1776818069094,
       "type": "file"
     },
     {
       "path": "Sources/RankCategoryView.swift",
-      "accessCount": 25,
-      "lastAccessed": 1776772146430,
-      "type": "file"
-    },
-    {
-      "path": "doc.md",
-      "accessCount": 14,
-      "lastAccessed": 1776772326377,
-      "type": "file"
-    },
-    {
-      "path": "Sources/PlaylistDetailView.swift",
-      "accessCount": 13,
-      "lastAccessed": 1776771672706,
-      "type": "file"
-    },
-    {
-      "path": "Sources/PlaylistListView.swift",
-      "accessCount": 10,
-      "lastAccessed": 1776772748588,
-      "type": "file"
-    },
-    {
-      "path": "Sources",
-      "accessCount": 8,
-      "lastAccessed": 1776772321961,
-      "type": "directory"
-    },
-    {
-      "path": "Sources/MusicCacheManager.swift",
-      "accessCount": 7,
-      "lastAccessed": 1776760867949,
+      "accessCount": 27,
+      "lastAccessed": 1776774996706,
       "type": "file"
     },
     {
       "path": "Sources/PlayerManager.swift",
-      "accessCount": 5,
-      "lastAccessed": 1776760671608,
+      "accessCount": 23,
+      "lastAccessed": 1776774983296,
+      "type": "file"
+    },
+    {
+      "path": "doc.md",
+      "accessCount": 18,
+      "lastAccessed": 1776774866804,
+      "type": "file"
+    },
+    {
+      "path": "Sources/PlaylistDetailView.swift",
+      "accessCount": 15,
+      "lastAccessed": 1776774999772,
+      "type": "file"
+    },
+    {
+      "path": "Sources/PlayerView.swift",
+      "accessCount": 14,
+      "lastAccessed": 1776773591708,
+      "type": "file"
+    },
+    {
+      "path": "Sources/PlaylistListView.swift",
+      "accessCount": 12,
+      "lastAccessed": 1776775003216,
+      "type": "file"
+    },
+    {
+      "path": "Sources",
+      "accessCount": 11,
+      "lastAccessed": 1776774832104,
+      "type": "directory"
+    },
+    {
+      "path": "Sources/MusicCacheManager.swift",
+      "accessCount": 8,
+      "lastAccessed": 1776774851610,
+      "type": "file"
+    },
+    {
+      "path": "Sources/RecentPlaylistView.swift",
+      "accessCount": 7,
+      "lastAccessed": 1776774989321,
       "type": "file"
     },
     {
@@ -131,14 +143,14 @@
     },
     {
       "path": "Sources/DetailListView.swift",
-      "accessCount": 2,
-      "lastAccessed": 1776737640605,
+      "accessCount": 4,
+      "lastAccessed": 1776774991964,
       "type": "file"
     },
     {
-      "path": "Sources/PlayerView.swift",
-      "accessCount": 2,
-      "lastAccessed": 1776768194693,
+      "path": "Sources/MusicTrackEntity.swift",
+      "accessCount": 3,
+      "lastAccessed": 1776817799234,
       "type": "file"
     },
     {
@@ -148,21 +160,21 @@
       "type": "file"
     },
     {
-      "path": "Sources/RecentPlaylistView.swift",
-      "accessCount": 1,
-      "lastAccessed": 1776736901692,
-      "type": "file"
-    },
-    {
-      "path": "Sources/MusicTrackEntity.swift",
-      "accessCount": 1,
-      "lastAccessed": 1776736912876,
-      "type": "file"
-    },
-    {
       "path": "Sources/RecentTrackEntity.swift",
       "accessCount": 1,
       "lastAccessed": 1776736912891,
+      "type": "file"
+    },
+    {
+      "path": "",
+      "accessCount": 1,
+      "lastAccessed": 1776774846596,
+      "type": "directory"
+    },
+    {
+      "path": "Sources/String+Extensions.swift",
+      "accessCount": 1,
+      "lastAccessed": 1776817898922,
       "type": "file"
     }
   ],

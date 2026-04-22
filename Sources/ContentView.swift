@@ -64,9 +64,16 @@ struct HomeView: View {
     @State private var isLoadingRanks = true
     @State private var isLoadingPlaylists = true
     @State private var isLoadingSongs = true
+    @State private var isLoadingMoreSongs = false
+    @State private var hasMoreSongs = true
+    @State private var recommendPage = 1
     @State private var rankError: String?
     @State private var playlistError: String?
     @State private var songsError: String?
+    @State private var playbackErrorMessage: String?
+    @State private var showPlaybackAlert = false
+
+    @Query var favorites: [MusicTrackEntity]
 
     // 2列网格布局
     let gridColumns = [
@@ -91,7 +98,12 @@ struct HomeView: View {
         .onAppear {
             fetchRankCategories()
             fetchPlaylists()
-            fetchRecommendSongs()
+            fetchRecommendSongs(reset: true)
+        }
+        .alert("播放错误", isPresented: $showPlaybackAlert, presenting: playbackErrorMessage) { _ in
+            Button("确定", role: .cancel) {}
+        } message: { message in
+            Text(message)
         }
     }
 
@@ -238,7 +250,7 @@ struct HomeView: View {
             if isLoadingSongs {
                 recommendLoadingView
             } else if let error = songsError {
-                errorView(error, retry: fetchRecommendSongs)
+                errorView(error, retry: { fetchRecommendSongs(reset: true) })
             } else if recommendedSongs.isEmpty {
                 Text("暂无推荐歌曲")
                     .font(.subheadline)
@@ -268,51 +280,99 @@ struct HomeView: View {
     }
 
     private var recommendSongsList: some View {
-        ForEach(recommendedSongs) { item in
-            HStack {
-                Button(action: {
-                    HapticManager.shared.selection()
-                    playTrack(item, from: recommendedSongs)
-                }) {
-                    HStack(spacing: 12) {
-                        AsyncImage(url: URL(string: item.absoluteCover)) { image in
-                            image.resizable().aspectRatio(contentMode: .fill)
-                        } placeholder: {
-                            Image(systemName: "music.note").foregroundColor(.secondary)
+        Group {
+            ForEach(recommendedSongs) { item in
+                HStack(spacing: 12) {
+                    Button(action: {
+                        HapticManager.shared.selection()
+                        playTrack(item, from: recommendedSongs)
+                    }) {
+                        HStack(spacing: 12) {
+                            AsyncImage(url: URL(string: item.absoluteCover)) { image in
+                                image.resizable().aspectRatio(contentMode: .fill)
+                            } placeholder: {
+                                Image(systemName: "music.note").foregroundColor(.secondary)
+                            }
+                            .frame(width: 50, height: 50)
+                            .cornerRadius(8)
+                            .clipped()
+                            VStack(alignment: .leading) {
+                                Text(item.name).font(.headline).lineLimit(1).foregroundColor(.primary)
+                                HStack(spacing: 4) {
+                                    Text(item.artist).font(.subheadline).foregroundColor(.secondary)
+                                    if let album = item.albumName, !album.isEmpty {
+                                        Text("•").font(.caption).foregroundColor(.secondary)
+                                        Text(album).font(.caption).foregroundColor(.secondary).lineLimit(1)
+                                    }
+                                }
+                            }
                         }
-                        .frame(width: 50, height: 50)
-                        .cornerRadius(8)
-                        .clipped()
-                        VStack(alignment: .leading) {
-                            Text(item.name).font(.headline).lineLimit(1).foregroundColor(.primary)
-                            Text(item.artist).font(.subheadline).foregroundColor(.secondary)
+                        .contentShape(Rectangle())
+                    }
+                    .buttonStyle(PlainButtonStyle())
+                    Spacer()
+
+                    Button(action: {
+                        withAnimation {
+                            toggleFavorite(item)
+                        }
+                    }) {
+                        Image(systemName: isFavorited(item) ? "heart.fill" : "heart")
+                            .foregroundColor(isFavorited(item) ? .red : .gray)
+                            .font(.system(size: 18))
+                    }
+                    .buttonStyle(BorderlessButtonStyle())
+
+                    if let duration = item.duration {
+                        Text(formatDuration(duration))
+                            .font(.caption)
+                            .foregroundColor(.secondary)
+                            .frame(width: 40, alignment: .trailing)
+                    }
+
+                    if playerManager.currentTrack?.id == item.id {
+                        Image(systemName: playerManager.isPlaying ? "pause.fill" : "play.fill")
+                            .foregroundColor(.accentColor)
+                            .frame(width: 24, height: 24)
+                    }
+                }
+                .padding(.horizontal)
+                .padding(.vertical, 4)
+            }
+
+            // 加载更多触发器
+            if !recommendedSongs.isEmpty && hasMoreSongs {
+                HStack {
+                    Spacer()
+                    if isLoadingMoreSongs {
+                        ProgressView()
+                    } else {
+                        Button("加载更多") {
+                            loadMoreRecommendSongs()
+                        }
+                        .foregroundColor(.accentColor)
+                        .onAppear {
+                            loadMoreRecommendSongs()
                         }
                     }
-                    .contentShape(Rectangle())
+                    Spacer()
                 }
-                .buttonStyle(PlainButtonStyle())
-                Spacer()
-                if playerManager.currentTrack?.id == item.id {
-                    Image(systemName: playerManager.isPlaying ? "pause.fill" : "play.fill")
-                        .foregroundColor(.accentColor)
-                        .frame(width: 24, height: 24)
-                } else {
-                    Image(systemName: "play.circle")
-                        .foregroundColor(.secondary)
-                        .frame(width: 24, height: 24)
-                }
+                .padding(.vertical, 10)
             }
-            .padding(.horizontal)
-            .padding(.vertical, 4)
         }
     }
 
     // MARK: 模块4：最近播放
     private var recentPlayedSection: some View {
         VStack(alignment: .leading, spacing: 12) {
-            Text("⏱ 最近播放")
-                .font(.title2.bold())
-                .padding(.horizontal)
+            HStack {
+                Text("⏱ 最近播放")
+                    .font(.title2.bold())
+                Spacer()
+                NavigationLink("查看全部", destination: RecentPlaylistView())
+                    .font(.subheadline)
+            }
+            .padding(.horizontal)
 
             ForEach(recentTracks.prefix(5)) { item in
                 HStack {
@@ -399,20 +459,44 @@ struct HomeView: View {
         }
     }
 
-    private func fetchRecommendSongs() {
-        isLoadingSongs = true
+    private func fetchRecommendSongs(reset: Bool = false) {
+        if reset {
+            recommendPage = 1
+            recommendedSongs = []
+            hasMoreSongs = true
+            isLoadingSongs = true
+        } else {
+            isLoadingMoreSongs = true
+        }
         songsError = nil
-        MusicApiService.shared.fetchRecommendSongs(page: 1, pageSize: 10) { result in
+        MusicApiService.shared.fetchRecommendSongs(page: recommendPage, pageSize: 10) { result in
             DispatchQueue.main.async {
                 isLoadingSongs = false
+                isLoadingMoreSongs = false
                 switch result {
                 case .success(let songs):
-                    self.recommendedSongs = songs
+                    if reset {
+                        self.recommendedSongs = songs
+                    } else {
+                        // 去重
+                        let existingIds = Set(self.recommendedSongs.map { $0.id })
+                        let newSongs = songs.filter { !existingIds.contains($0.id) }
+                        self.recommendedSongs.append(contentsOf: newSongs)
+                    }
+                    if songs.count < 10 {
+                        hasMoreSongs = false
+                    }
+                    if !reset { recommendPage += 1 }
                 case .failure(let error):
                     self.songsError = error.localizedDescription
                 }
             }
         }
+    }
+
+    private func loadMoreRecommendSongs() {
+        guard hasMoreSongs && !isLoadingMoreSongs else { return }
+        fetchRecommendSongs()
     }
 
     private func formatCount(_ count: Int) -> String {
@@ -426,14 +510,26 @@ struct HomeView: View {
         // 推荐歌曲的 url 字段可能为空，需要通过搜索 API 解析
         if item.url.isEmpty {
             MusicApiService.shared.resolveKugouPlayUrl(name: item.name, artist: item.artist, hash: item.id) { audioUrl, lrcUrl in
-                guard let audioUrl = audioUrl else { return }
+                guard let audioUrl = audioUrl else {
+                    DispatchQueue.main.async {
+                        self.playbackErrorMessage = "无法获取播放地址，请稍后重试"
+                        self.showPlaybackAlert = true
+                    }
+                    return
+                }
                 DispatchQueue.main.async {
                     self.playTrackWithUrl(item, audioUrl: audioUrl, lrcUrl: lrcUrl, from: list)
                 }
             }
         } else {
             MusicApiService.shared.resolvePlayUrl(url: item.absoluteUrl) { url in
-                guard let audioUrl = url else { return }
+                guard let audioUrl = url else {
+                    DispatchQueue.main.async {
+                        self.playbackErrorMessage = "无法获取播放地址，请稍后重试"
+                        self.showPlaybackAlert = true
+                    }
+                    return
+                }
                 DispatchQueue.main.async {
                     self.playTrackWithUrl(item, audioUrl: audioUrl, lrcUrl: nil, from: list)
                 }
@@ -455,7 +551,6 @@ struct HomeView: View {
             sourceUrl: item.absoluteUrl
         )
         playerManager.play(track: track)
-        playerManager.setPlaylistFromRecent(self.recentTracks)
         saveToRecent(track, originalUrl: item.absoluteUrl)
         playerManager.setPlaylistFromRecent(self.recentTracks)
 
@@ -466,7 +561,6 @@ struct HomeView: View {
                     var updated = track
                     updated.lrc = lyric
                     saveToRecent(updated, originalUrl: item.absoluteUrl)
-                    playerManager.setPlaylistFromRecent(self.recentTracks)
                 }
             }
         }
@@ -490,7 +584,13 @@ struct HomeView: View {
         if let index = tracks.firstIndex(where: { $0.id == item.id }) {
             let targetTrack = tracks[index]
             MusicApiService.shared.resolvePlayUrl(url: targetTrack.audioUrl) { url in
-                guard let realUrl = url else { return }
+                guard let realUrl = url else {
+                    DispatchQueue.main.async {
+                        self.playbackErrorMessage = "无法获取播放地址，请稍后重试"
+                        self.showPlaybackAlert = true
+                    }
+                    return
+                }
                 DispatchQueue.main.async {
                     let updatedTrack = PlayerManager.MusicTrack(
                         id: targetTrack.id,
@@ -505,7 +605,6 @@ struct HomeView: View {
                     )
                     self.playerManager.play(track: updatedTrack)
                     self.saveToRecent(updatedTrack, originalUrl: item.audioUrl)
-                    // Sync playlist to recent tracks
                     self.playerManager.setPlaylistFromRecent(self.recentTracks)
 
                     if item.lrc == nil, let lrcUrl = item.lrcUrl {
@@ -516,7 +615,6 @@ struct HomeView: View {
                                     var withLyric = updatedTrack
                                     withLyric.lrc = lyric
                                     self.saveToRecent(withLyric, originalUrl: item.audioUrl)
-                                    self.playerManager.setPlaylistFromRecent(self.recentTracks)
                                 }
                             }
                         }
@@ -545,6 +643,36 @@ struct HomeView: View {
             lastPlayed: Date()
         )
         modelContext.insert(recent)
+    }
+
+    private func isFavorited(_ item: MusicApiService.MusicItem) -> Bool {
+        favorites.contains { $0.id == item.id }
+    }
+
+    private func toggleFavorite(_ item: MusicApiService.MusicItem) {
+        if let existingIndex = favorites.firstIndex(where: { $0.id == item.id }) {
+            modelContext.delete(favorites[existingIndex])
+            HapticManager.shared.notification(type: .success)
+        } else {
+            let favorite = MusicTrackEntity(
+                id: item.id,
+                name: item.name,
+                singer: item.artist,
+                albumName: item.albumName,
+                imageUrl: item.absoluteCover,
+                audioUrl: item.absoluteUrl,
+                lrcUrl: item.absoluteLrc,
+                lrc: nil
+            )
+            modelContext.insert(favorite)
+            HapticManager.shared.notification(type: .success)
+        }
+    }
+
+    private func formatDuration(_ seconds: Int) -> String {
+        let mins = seconds / 60
+        let secs = seconds % 60
+        return String(format: "%d:%02d", mins, secs)
     }
 }
 
@@ -834,8 +962,10 @@ struct LibraryView: View {
     @Query(sort: \RecentTrackEntity.lastPlayed, order: .reverse) var recentTracks: [RecentTrackEntity]
     @Environment(\.modelContext) private var modelContext
     @EnvironmentObject var playerManager: PlayerManager
-    
+
     @StateObject private var cacheManager = MusicCacheManager.shared
+    @State private var playbackErrorMessage: String?
+    @State private var showPlaybackAlert = false
     
     var body: some View {
         List {
@@ -906,36 +1036,84 @@ struct LibraryView: View {
             }
         }
         .navigationTitle("媒体库")
+        .alert("播放错误", isPresented: $showPlaybackAlert, presenting: playbackErrorMessage) { _ in
+            Button("确定", role: .cancel) {}
+        } message: { message in
+            Text(message)
+        }
     }
     
     private func playTrack(_ item: MusicTrackEntity) {
-        // Resolve the URL before playback to ensure it's fresh/valid
-        MusicApiService.shared.resolvePlayUrl(url: item.audioUrl) { url in
-            guard let audioUrl = url else { return }
+        // Detect Kugou song by ID (32-char hex hash)
+        let isKugou = item.id.count == 32 && item.id.range(of: "^[0-9a-fA-F]+$", options: .regularExpression) != nil
 
-            DispatchQueue.main.async {
-                let track = PlayerManager.MusicTrack(
-                    id: item.id,
-                    name: item.name,
-                    singer: item.singer,
-                    albumName: item.albumName,
-                    imageUrl: item.imageUrl,
-                    audioUrl: audioUrl,
-                    lrcUrl: item.lrcUrl,
-                    lrc: item.lrc,
-                    sourceUrl: item.audioUrl
-                )
-                playerManager.play(track: track)
-                // Sync playlist to recent tracks
-                playerManager.setPlaylistFromRecent(self.recentTracks)
+        if isKugou {
+            MusicApiService.shared.resolveKugouPlayUrl(name: item.name, artist: item.singer, hash: item.id) { audioUrl, lrcUrl in
+                guard let audioUrl = audioUrl else {
+                    DispatchQueue.main.async {
+                        self.playbackErrorMessage = "无法获取播放地址：\(item.name)"
+                        self.showPlaybackAlert = true
+                    }
+                    return
+                }
+                DispatchQueue.main.async {
+                    let track = PlayerManager.MusicTrack(
+                        id: item.id,
+                        name: item.name,
+                        singer: item.singer,
+                        albumName: item.albumName,
+                        imageUrl: item.imageUrl,
+                        audioUrl: audioUrl,
+                        lrcUrl: lrcUrl?.isEmpty == false ? lrcUrl! : item.lrcUrl,
+                        lrc: item.lrc,
+                        sourceUrl: item.audioUrl
+                    )
+                    self.playerManager.play(track: track)
+                    self.playerManager.setPlaylistFromRecent(self.recentTracks)
 
-                // If content is missing but URL exists, fetch it
-                if item.lrc == nil, let lrcUrl = item.lrcUrl {
-                     MusicApiService.shared.fetchLyric(lrcUrl: lrcUrl) { lrc in
-                        if let lyric = lrc {
-                            DispatchQueue.main.async {
-                                playerManager.lyrics = lyric
-                                item.lrc = lyric
+                    if item.lrc == nil, let lrcUrl = track.lrcUrl {
+                        MusicApiService.shared.fetchLyric(lrcUrl: lrcUrl) { lrc in
+                            if let lyric = lrc {
+                                DispatchQueue.main.async {
+                                    self.playerManager.lyrics = lyric
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        } else {
+            // Use resolvePlayUrlFresh to get a fresh URL with valid signatures
+            MusicApiService.shared.resolvePlayUrlFresh(sourceUrl: item.audioUrl, name: item.name, artist: item.singer) { url, lrcUrl in
+                guard let audioUrl = url else {
+                    DispatchQueue.main.async {
+                        self.playbackErrorMessage = "无法获取播放地址：\(item.name)"
+                        self.showPlaybackAlert = true
+                    }
+                    return
+                }
+
+                DispatchQueue.main.async {
+                    let track = PlayerManager.MusicTrack(
+                        id: item.id,
+                        name: item.name,
+                        singer: item.singer,
+                        albumName: item.albumName,
+                        imageUrl: item.imageUrl,
+                        audioUrl: audioUrl,
+                        lrcUrl: lrcUrl?.isEmpty == false ? lrcUrl! : item.lrcUrl,
+                        lrc: item.lrc,
+                        sourceUrl: item.audioUrl
+                    )
+                    self.playerManager.play(track: track)
+                    self.playerManager.setPlaylistFromRecent(self.recentTracks)
+
+                    if item.lrc == nil, let lrcUrl = track.lrcUrl {
+                        MusicApiService.shared.fetchLyric(lrcUrl: lrcUrl) { lrc in
+                            if let lyric = lrc {
+                                DispatchQueue.main.async {
+                                    self.playerManager.lyrics = lyric
+                                }
                             }
                         }
                     }

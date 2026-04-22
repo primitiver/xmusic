@@ -32,9 +32,11 @@ class MusicApiService {
         let cover: String
         let link: String?
         var duration: Int?
+        var albumName: String?
 
         enum CodingKeys: String, CodingKey {
             case songid, name, artist, lrc, url, cover, link, duration
+            case albumName = "album_name"
         }
         
         init(from decoder: Decoder) throws {
@@ -56,6 +58,7 @@ class MusicApiService {
             cover = (try? container.decode(String.self, forKey: .cover)) ?? ""
             link = try? container.decode(String.self, forKey: .link)
             duration = try? container.decode(Int.self, forKey: .duration)
+            albumName = try? container.decode(String.self, forKey: .albumName)
         }
 
         // Manual memberwise initializer for creating MusicItem from Kugou data
@@ -68,6 +71,7 @@ class MusicApiService {
             self.cover = cover
             self.link = link
             self.duration = nil
+            self.albumName = nil
         }
 
         // Helper to set duration manually (for Kugou songs)
@@ -711,7 +715,7 @@ class MusicApiService {
                 if response.status == 1, let songInfos = response.data?.lists {
                     // Convert KugouSongInfo to MusicItem
                     let items = songInfos.map { info in
-                        MusicItem(
+                        var item = MusicItem(
                             songid: info.hash,
                             name: info.songname,
                             artist: info.singername,
@@ -720,6 +724,11 @@ class MusicApiService {
                             cover: info.imgurl ?? "",
                             link: nil
                         )
+                        item.duration = info.duration
+                        if let album = info.album_name, !album.isEmpty {
+                            item.albumName = album
+                        }
+                        return item
                     }
                     completion(.success(items))
                 } else {
@@ -731,6 +740,58 @@ class MusicApiService {
                 completion(.failure(error))
             }
         }.resume()
+    }
+
+    /// 从 sourceUrl 中提取 type 和 id，重新搜索获取新鲜 URL
+    func resolvePlayUrlFresh(sourceUrl: String, name: String, artist: String, completion: @escaping (String?, String?) -> Void) {
+        print("🌐 [MusicApi] Resolving fresh play URL from source: \(sourceUrl)")
+
+        // Try to extract type and id from sourceUrl (e.g., api.php?get=url&type=kg&id=HASH&sign=XXX&t=XXX)
+        var sourceType: String?
+        var sourceId: String?
+
+        if let typeRange = sourceUrl.range(of: "type=") {
+            let typeStart = typeRange.upperBound
+            if let ampersand = sourceUrl[typeStart...].firstIndex(of: "&") {
+                sourceType = String(sourceUrl[typeStart..<ampersand])
+            }
+        }
+        if let idRange = sourceUrl.range(of: "id=") {
+            let idStart = idRange.upperBound
+            if let ampersand = sourceUrl[idStart...].firstIndex(of: "&") {
+                sourceId = String(sourceUrl[idStart..<ampersand])
+            } else {
+                sourceId = String(sourceUrl[idStart...])
+            }
+        }
+
+        guard let type = sourceType, let id = sourceId, let musicType = MusicSource(rawValue: type) else {
+            // Cannot extract, fall back to direct resolution
+            print("⚠️ [MusicApi] Cannot extract type/id from sourceUrl, falling back to direct resolve")
+            resolvePlayUrl(url: sourceUrl) { url in
+                completion(url, nil)
+            }
+            return
+        }
+
+        let query = artist.isEmpty ? name : "\(name) - \(artist)"
+        search(query: query, type: musicType, page: 1) { result in
+            switch result {
+            case .success(let items):
+                if let first = items.first, !first.url.isEmpty {
+                    let playUrl = first.absoluteUrl
+                    let lyricUrl = first.absoluteLrc
+                    print("✅ [MusicApi] Fresh Play URL: \(playUrl)")
+                    completion(playUrl, lyricUrl)
+                } else {
+                    print("❌ [MusicApi] Search returned no URL for: \(query)")
+                    completion(nil, nil)
+                }
+            case .failure(let error):
+                print("❌ [MusicApi] Search failed: \(error.localizedDescription)")
+                completion(nil, nil)
+            }
+        }
     }
 
     // MARK: - 酷狗歌曲播放地址解析

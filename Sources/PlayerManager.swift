@@ -21,7 +21,7 @@ class PlayerManager: ObservableObject {
     @Published var parsedLyrics: [LyricLine] = []
     @Published var currentPlaylist: [MusicTrack] = []
     @Published var currentIndex: Int = 0
-    @Published var playMode: PlayMode = .sequential {
+    @Published var playMode: PlayMode = .loopAll {
         didSet {
             UserDefaults.standard.set(playMode.rawValue, forKey: "playMode")
             updateRemoteCommandCenter()
@@ -229,31 +229,55 @@ class PlayerManager: ObservableObject {
             // Player not initialized (e.g., after app restart)
             // Try to resolve URL and play
             print("🔄 [Player] Restoring playback for: \(track.name)")
-            
-            // Use sourceUrl if available, otherwise fallback to audioUrl
-            let urlToResolve = track.sourceUrl ?? track.audioUrl
-            
-            MusicApiService.shared.resolvePlayUrl(url: urlToResolve) { [weak self] resolvedUrl in
-                guard let self = self, let url = resolvedUrl else { return }
-                
-                DispatchQueue.main.async {
-                    let freshTrack = MusicTrack(
-                        id: track.id,
-                        name: track.name,
-                        singer: track.singer,
-                        albumName: track.albumName,
-                        imageUrl: track.imageUrl,
-                        audioUrl: url,
-                        lrcUrl: track.lrcUrl,
-                        lrc: track.lrc,
-                        sourceUrl: track.sourceUrl ?? track.audioUrl
-                    )
-                    self.play(track: freshTrack)
+
+            // Detect Kugou song by track ID (32-char hex hash)
+            let isKugou = track.id.count == 32 && track.id.range(of: "^[0-9a-fA-F]+$", options: .regularExpression) != nil
+
+            if isKugou {
+                // Kugou song - re-resolve via search API
+                MusicApiService.shared.resolveKugouPlayUrl(name: track.name, artist: track.singer, hash: track.id) { [weak self] resolvedUrl, _ in
+                    guard let self = self, let url = resolvedUrl else { return }
+
+                    DispatchQueue.main.async {
+                        let freshTrack = MusicTrack(
+                            id: track.id,
+                            name: track.name,
+                            singer: track.singer,
+                            albumName: track.albumName,
+                            imageUrl: track.imageUrl,
+                            audioUrl: url,
+                            lrcUrl: track.lrcUrl,
+                            lrc: track.lrc,
+                            sourceUrl: track.sourceUrl ?? track.audioUrl
+                        )
+                        self.play(track: freshTrack)
+                    }
+                }
+            } else {
+                // jbsou.cn song - resolve normally
+                let urlToResolve = track.sourceUrl ?? track.audioUrl
+                MusicApiService.shared.resolvePlayUrl(url: urlToResolve) { [weak self] resolvedUrl in
+                    guard let self = self, let url = resolvedUrl else { return }
+
+                    DispatchQueue.main.async {
+                        let freshTrack = MusicTrack(
+                            id: track.id,
+                            name: track.name,
+                            singer: track.singer,
+                            albumName: track.albumName,
+                            imageUrl: track.imageUrl,
+                            audioUrl: url,
+                            lrcUrl: track.lrcUrl,
+                            lrc: track.lrc,
+                            sourceUrl: track.sourceUrl ?? track.audioUrl
+                        )
+                        self.play(track: freshTrack)
+                    }
                 }
             }
             return
         }
-        
+
         if isPlaying {
             player?.pause()
         } else {
@@ -478,8 +502,43 @@ class PlayerManager: ObservableObject {
         }
         
         // 2. Not cached, resolve remote URL
+        // Detect Kugou song by track ID (32-char hex hash)
+        let isKugou = track.id.count == 32 && track.id.range(of: "^[0-9a-fA-F]+$", options: .regularExpression) != nil
+
+        if isKugou {
+            MusicApiService.shared.resolveKugouPlayUrl(name: track.name, artist: track.singer, hash: track.id) { [weak self] resolvedUrl, lrcUrl in
+                guard let self = self, let url = resolvedUrl else { return }
+
+                DispatchQueue.main.async {
+                    let updatedTrack = MusicTrack(
+                        id: track.id,
+                        name: track.name,
+                        singer: track.singer,
+                        albumName: track.albumName,
+                        imageUrl: track.imageUrl,
+                        audioUrl: url,
+                        lrcUrl: lrcUrl?.isEmpty == false ? lrcUrl! : track.lrcUrl,
+                        lrc: track.lrc,
+                        sourceUrl: track.sourceUrl
+                    )
+
+                    self.play(track: updatedTrack)
+
+                    if updatedTrack.lrc == nil, let lrcUrl = updatedTrack.lrcUrl {
+                        MusicApiService.shared.fetchLyric(lrcUrl: lrcUrl) { lrc in
+                            if let lyric = lrc {
+                                DispatchQueue.main.async {
+                                    self.lyrics = lyric
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            return
+        }
+
         let urlToResolve = track.sourceUrl ?? track.audioUrl
-        
         MusicApiService.shared.resolvePlayUrl(url: urlToResolve) { [weak self] resolvedUrl in
             guard let self = self, let url = resolvedUrl else { return }
             

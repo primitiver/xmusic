@@ -100,8 +100,12 @@ struct RecentPlaylistView: View {
     private func playFromList(_ item: RecentTrackEntity) {
         if let index = recentTracks.firstIndex(where: { $0.id == item.id }) {
             let targetTrack = recentTracks[index]
-            MusicApiService.shared.resolvePlayUrl(url: targetTrack.audioUrl) { url in
-                guard let realUrl = url else { return }
+
+            // Use sourceUrl to re-resolve fresh URL (extracts type/id from the saved URL)
+            let sourceUrl = targetTrack.audioUrl
+            print("🔄 [RecentPlay] Re-resolving URL for: \(targetTrack.name)")
+            MusicApiService.shared.resolvePlayUrlFresh(sourceUrl: sourceUrl, name: targetTrack.name, artist: targetTrack.singer) { audioUrl, lrcUrl in
+                guard let audioUrl = audioUrl else { return }
                 DispatchQueue.main.async {
                     let updatedTrack = PlayerManager.MusicTrack(
                         id: targetTrack.id,
@@ -109,13 +113,12 @@ struct RecentPlaylistView: View {
                         singer: targetTrack.singer,
                         albumName: targetTrack.albumName,
                         imageUrl: targetTrack.imageUrl,
-                        audioUrl: realUrl,
-                        lrcUrl: targetTrack.lrcUrl,
+                        audioUrl: audioUrl,
+                        lrcUrl: lrcUrl?.isEmpty == false ? lrcUrl! : targetTrack.lrcUrl,
                         lrc: targetTrack.lrc,
-                        sourceUrl: targetTrack.audioUrl
+                        sourceUrl: sourceUrl
                     )
                     self.playerManager.play(track: updatedTrack)
-                    // Sync playlist to recent tracks
                     self.playerManager.setPlaylistFromRecent(self.recentTracks)
                 }
             }
