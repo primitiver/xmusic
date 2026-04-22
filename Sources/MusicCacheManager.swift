@@ -39,33 +39,106 @@ class MusicCacheManager: ObservableObject {
     
     func isCached(id: String) -> Bool {
         guard let fileURL = getFileURL(for: id) else { return false }
-        return fileManager.fileExists(atPath: fileURL.path)
+        guard fileManager.fileExists(atPath: fileURL.path) else { return false }
+        // Validate the cached file is actually valid audio data
+        return isValidAudioFile(at: fileURL)
     }
-    
+
     func cachedURL(for id: String) -> URL? {
         guard let fileURL = getFileURL(for: id), fileManager.fileExists(atPath: fileURL.path) else { return nil }
+        // Validate the cached file is actually valid audio data
+        guard isValidAudioFile(at: fileURL) else {
+            print("⚠️ [Cache] Cached file is invalid, removing: \(id)")
+            try? fileManager.removeItem(at: fileURL)
+            return nil
+        }
         return fileURL
+    }
+
+    /// Check if a file contains valid audio data by examining file size and magic bytes
+    private func isValidAudioFile(at url: URL) -> Bool {
+        guard let attributes = try? fileManager.attributesOfItem(atPath: url.path),
+              let fileSize = attributes[.size] as? NSNumber else {
+            return false
+        }
+
+        // Files smaller than 10KB are likely not valid audio
+        let sizeKB = fileSize.int64Value / 1024
+        guard sizeKB >= 10 else {
+            print("⚠️ [Cache] File too small (\(sizeKB)KB) to be valid audio: \(url.lastPathComponent)")
+            return false
+        }
+
+        // Check for common audio file headers
+        guard let handle = try? FileHandle(forReadingFrom: url) else { return false }
+        defer { try? handle.close() }
+
+        let headerData = handle.readData(ofLength: 12)
+        guard headerData.count >= 4 else { return false }
+        let headerBytes = [UInt8](headerData)
+
+        // MP3: starts with 0xFF 0xFB, 0xFF 0xFA, or 0xFF 0xF3
+        if headerBytes[0] == 0xFF && (headerBytes[1] & 0xF0) == 0xF0 {
+            return true
+        }
+
+        // MP4/M4A: starts with "ftyp" at offset 4
+        if headerData.count >= 8 {
+            let ftypRange = 4..<min(8, headerData.count)
+            if String(bytes: headerData[ftypRange], encoding: .ascii) == "ftyp" {
+                return true
+            }
+        }
+
+        // WAV: starts with "RIFF"
+        if headerData.count >= 4, String(bytes: headerData[0..<4], encoding: .ascii) == "RIFF" {
+            return true
+        }
+
+        // OGG: starts with "OggS"
+        if headerData.count >= 4, String(bytes: headerData[0..<4], encoding: .ascii) == "OggS" {
+            return true
+        }
+
+        // FLAC: starts with "fLaC"
+        if headerData.count >= 4, String(bytes: headerData[0..<4], encoding: .ascii) == "fLaC" {
+            return true
+        }
+
+        print("⚠️ [Cache] Unknown audio header: \(url.lastPathComponent), bytes: \(String(format: "%02X %02X %02X %02X", headerBytes[0], headerBytes[1], headerBytes[2], headerBytes[3]))")
+        return false
     }
     
     func startCaching(url: String, id: String) {
         guard let remoteURL = URL(string: url), !isCached(id: id) else { return }
-        
+
         // Avoid duplicate downloads
         if downloadTasks[id] != nil { return }
-        
+
         print("📥 [Cache] Start downloading: \(id)")
-        
-        let task = URLSession.shared.downloadTask(with: remoteURL) { [weak self] tempURL, response, error in
+
+        // Use a URLSession with the same headers that AVPlayer uses for this URL
+        var request = URLRequest(url: remoteURL)
+        request.setValue("Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36", forHTTPHeaderField: "User-Agent")
+        request.setValue("https://www.jbsou.cn/", forHTTPHeaderField: "Referer")
+
+        let task = URLSession.shared.downloadTask(with: request) { [weak self] tempURL, response, error in
             guard let self = self else { return }
             self.downloadTasks.removeValue(forKey: id)
-            
+
             if let error = error {
                 print("❌ [Cache] Download failed: \(error.localizedDescription)")
                 return
             }
-            
+
+            // Validate response
+            if let httpResponse = response as? HTTPURLResponse, httpResponse.statusCode != 200 {
+                print("❌ [Cache] Bad HTTP status: \(httpResponse.statusCode) for \(id)")
+                return
+            }
+
             guard let tempURL = tempURL, let destinationURL = self.getFileURL(for: id) else { return }
-            
+
             do {
                 if self.fileManager.fileExists(atPath: destinationURL.path) {
                     try self.fileManager.removeItem(at: destinationURL)
@@ -79,7 +152,7 @@ class MusicCacheManager: ObservableObject {
                 print("❌ [Cache] Save file failed: \(error.localizedDescription)")
             }
         }
-        
+
         downloadTasks[id] = task
         task.resume()
     }

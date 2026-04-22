@@ -56,206 +56,417 @@ struct HomeView: View {
     @Query(sort: \RecentTrackEntity.lastPlayed, order: .reverse) var recentTracks: [RecentTrackEntity]
     @EnvironmentObject var playerManager: PlayerManager
     @Environment(\.modelContext) private var modelContext
-    @State private var recommendedTracks: [MusicApiService.MusicItem] = []
-    
-    let discoveryItems = [
-        ("甄选歌单", "music.note.list", Color.blue),
-        ("排行榜", "chart.bar.fill", Color.orange),
-        ("新歌速递", "sparkles", Color.purple),
-        ("电台", "radio.fill", Color.green)
+
+    // 新状态变量
+    @State private var rankCategories: [MusicApiService.RankCategory] = []
+    @State private var playlists: [MusicApiService.Playlist] = []
+    @State private var recommendedSongs: [MusicApiService.MusicItem] = []
+    @State private var isLoadingRanks = true
+    @State private var isLoadingPlaylists = true
+    @State private var isLoadingSongs = true
+    @State private var rankError: String?
+    @State private var playlistError: String?
+    @State private var songsError: String?
+
+    // 2列网格布局
+    let gridColumns = [
+        GridItem(.flexible(), spacing: 15),
+        GridItem(.flexible(), spacing: 15)
     ]
-    
+
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 25) {
-                // Header
-                Text("大家都在听")
-                    .font(.title2.bold())
-                    .padding(.horizontal)
-                
-                // Discovery Horizontal Scroll
-                ScrollView(.horizontal, showsIndicators: false) {
-                    HStack(spacing: 15) {
-                        ForEach(discoveryItems, id: \.0) { item in
-                            NavigationLink(destination: DetailListView(title: item.0, query: item.0)) {
-                                VStack {
-                                    ZStack {
-                                        RoundedRectangle(cornerRadius: 15)
-                                            .fill(item.2.gradient)
-                                            .frame(width: 120, height: 120)
-                                        
-                                        Image(systemName: item.1)
-                                            .font(.system(size: 40))
-                                            .foregroundColor(.white)
-                                    }
-                                    Text(item.0)
-                                        .font(.caption)
-                                        .fontWeight(.medium)
-                                        .foregroundColor(.primary)
-                                }
-                            }
-                            .simultaneousGesture(TapGesture().onEnded {
-                                HapticManager.shared.selection()
-                            })
-                            .buttonStyle(PlainButtonStyle())
-                        }
-                    }
-                    .padding(.horizontal)
-                }
-                
-                // Recently Played
+                rankSection
+                playlistSection
+                recommendSongsSection
                 if !recentTracks.isEmpty {
-                    VStack(alignment: .leading, spacing: 15) {
-                        Text("最近播放")
-                            .font(.title2.bold())
-                            .padding(.horizontal)
-                        
-                        ForEach(recentTracks.prefix(5)) { item in
-                            HStack {
-                                Button(action: {
-                                    playRecentTrack(item)
-                                }) {
-                                    HStack {
-                                    AsyncImage(url: URL(string: (item.imageUrl ?? "").normalizedMusicUrl)) { image in
-                                        image.resizable()
-                                            .aspectRatio(contentMode: .fill)
-                                    } placeholder: {
-                                        Image(systemName: "music.note")
-                                            .foregroundColor(.secondary)
-                                    }
-                                    .frame(width: 50, height: 50)
-                                    .cornerRadius(8)
-                                    .clipped()
-                                        
-                                        VStack(alignment: .leading) {
-                                            Text(item.name)
-                                                .font(.headline)
-                                                .foregroundColor(.primary)
-                                            Text(item.singer)
-                                                .font(.subheadline)
-                                                .foregroundColor(.secondary)
-                                        }
-                                    }
-                                }
-                                .buttonStyle(PlainButtonStyle())
-                                
-                                Spacer()
-                                
-                                NavigationLink(destination: DetailListView(title: item.singer, query: item.singer)) {
-                                    Image(systemName: "play.circle")
-                                        .foregroundColor(.accentColor)
-                                }
-                            }
-                            .padding(.horizontal)
-                        }
-                    }
+                    recentPlayedSection
                 }
-                
-                // Recommendations (Dynamic from Script)
-                VStack(alignment: .leading, spacing: 15) {
-                    Text("为你推荐")
-                        .font(.title2.bold())
-                        .padding(.horizontal)
-                    
-                    if recommendedTracks.isEmpty {
-                        Text("正在生成个性化推荐...")
-                            .font(.subheadline)
-                            .foregroundColor(.secondary)
-                            .padding(.horizontal)
-                            .onAppear {
-                                fetchRecommendations()
-                            }
-                    } else {
-                        ForEach(recommendedTracks) { item in
-                            HStack {
-                                Button(action: {
-                                    HapticManager.shared.selection()
-                                    playTrack(item, from: recommendedTracks)
-                                }) {
-                                    HStack(spacing: 15) {
-                                        AsyncImage(url: URL(string: item.absoluteCover)) { image in
-                                            image.resizable()
-                                                .aspectRatio(contentMode: .fill)
-                                        } placeholder: {
-                                            Image(systemName: "music.note")
-                                                .foregroundColor(.secondary)
-                                        }
-                                        .frame(width: 55, height: 55)
-                                        .cornerRadius(10)
-                                        .clipped()
-                                        
-                                        VStack(alignment: .leading) {
-                                            Text(item.name)
-                                                .font(.headline)
-                                                .foregroundColor(.primary)
-                                            Text(item.artist)
-                                                .font(.subheadline)
-                                                .foregroundColor(.secondary)
-                                        }
-                                    }
-                                    .contentShape(Rectangle())
-                                }
-                                .buttonStyle(BorderlessButtonStyle())
-                                Spacer()
-                            }
-                            .padding(.horizontal)
-                        }
-                    }
-                }
-                
                 Spacer(minLength: 100)
             }
             .padding(.top)
         }
         .navigationTitle("探索")
         .onAppear {
-            fetchRecommendations()
+            fetchRankCategories()
+            fetchPlaylists()
+            fetchRecommendSongs()
         }
     }
-    
-    private func fetchRecommendations() {
-        MusicApiService.shared.search(query: "2024热歌") { result in
-            if case .success(let items) = result {
-                DispatchQueue.main.async {
-                    self.recommendedTracks = Array(items.prefix(10))
+
+    // MARK: 模块1：热门榜单
+    private var rankSection: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack {
+                Text("🏆 热门榜单")
+                    .font(.title2.bold())
+                Spacer()
+                NavigationLink("查看全部", destination: RankCategoryView())
+                    .font(.subheadline)
+            }
+            .padding(.horizontal)
+
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 15) {
+                    if isLoadingRanks {
+                        rankLoadingView
+                    } else if let error = rankError {
+                        errorView(error, retry: fetchRankCategories)
+                    } else {
+                        ForEach(Array(rankCategories.prefix(8))) { rank in
+                            rankCard(rank)
+                        }
+                    }
+                }
+                .padding(.horizontal)
+            }
+        }
+    }
+
+    private var rankLoadingView: some View {
+        ForEach(0..<4, id: \.self) { _ in
+            RoundedRectangle(cornerRadius: 12)
+                .fill(Color.gray.opacity(0.2))
+                .frame(width: 140, height: 100)
+        }
+    }
+
+    private func rankCard(_ rank: MusicApiService.RankCategory) -> some View {
+        NavigationLink(destination: RankSongsView(rankId: rank.id, rankName: rank.name)) {
+            VStack(alignment: .leading, spacing: 8) {
+                AsyncImage(url: URL(string: rank.cover)) { image in
+                    image.resizable().aspectRatio(contentMode: .fill)
+                } placeholder: {
+                    Image(systemName: "chart.bar.fill").font(.system(size: 24)).foregroundColor(.white)
+                }
+                .frame(width: 140, height: 80)
+                .cornerRadius(12)
+                .clipped()
+                Text(rank.name)
+                    .font(.caption.bold())
+                    .lineLimit(1)
+                    .foregroundColor(.primary)
+            }
+        }
+        .buttonStyle(PlainButtonStyle())
+    }
+
+    // MARK: 模块2：推荐歌单
+    private var playlistSection: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack {
+                Text("🎵 推荐歌单")
+                    .font(.title2.bold())
+                Spacer()
+                NavigationLink("查看全部", destination: PlaylistListView())
+                    .font(.subheadline)
+            }
+            .padding(.horizontal)
+
+            if isLoadingPlaylists {
+                playlistLoadingView
+            } else if let error = playlistError {
+                errorView(error, retry: fetchPlaylists)
+            } else if playlists.isEmpty {
+                Text("暂无推荐歌单")
+                    .font(.subheadline)
+                    .foregroundColor(.secondary)
+                    .padding()
+            } else {
+                playlistGridView
+            }
+        }
+    }
+
+    private var playlistLoadingView: some View {
+        LazyVGrid(columns: gridColumns, spacing: 15) {
+            ForEach(0..<6, id: \.self) { _ in
+                RoundedRectangle(cornerRadius: 12)
+                    .fill(Color.gray.opacity(0.2))
+                    .frame(height: 180)
+            }
+        }
+        .padding(.horizontal)
+    }
+
+    private var playlistGridView: some View {
+        LazyVGrid(columns: gridColumns, spacing: 15) {
+            ForEach(playlists) { playlist in
+                NavigationLink(destination: PlaylistDetailView(playlist: playlist)) {
+                    VStack(alignment: .leading, spacing: 8) {
+                        AsyncImage(url: URL(string: playlist.cover)) { image in
+                            image.resizable().aspectRatio(contentMode: .fill)
+                        } placeholder: {
+                            Image(systemName: "music.note.list").foregroundColor(.secondary)
+                        }
+                        .frame(height: 120)
+                        .cornerRadius(12)
+                        .clipped()
+                        .overlay(alignment: .bottomTrailing) {
+                            Text("\(playlist.songCount)首")
+                                .font(.caption2.bold())
+                                .foregroundColor(.white)
+                                .padding(.horizontal, 6)
+                                .padding(.vertical, 2)
+                                .background(Color.black.opacity(0.6))
+                                .cornerRadius(4)
+                                .padding(4)
+                        }
+                        Text(playlist.name)
+                            .font(.subheadline.bold())
+                            .lineLimit(1)
+                            .foregroundColor(.primary)
+                        Text(formatCount(playlist.playCount))
+                            .font(.caption)
+                            .foregroundColor(.secondary)
+                    }
+                }
+                .buttonStyle(PlainButtonStyle())
+            }
+        }
+        .padding(.horizontal)
+    }
+
+    // MARK: 模块3：为你推荐
+    private var recommendSongsSection: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text("✨ 为你推荐")
+                .font(.title2.bold())
+                .padding(.horizontal)
+
+            if isLoadingSongs {
+                recommendLoadingView
+            } else if let error = songsError {
+                errorView(error, retry: fetchRecommendSongs)
+            } else if recommendedSongs.isEmpty {
+                Text("暂无推荐歌曲")
+                    .font(.subheadline)
+                    .foregroundColor(.secondary)
+                    .padding()
+            } else {
+                recommendSongsList
+            }
+        }
+    }
+
+    private var recommendLoadingView: some View {
+        VStack(spacing: 12) {
+            ForEach(0..<5, id: \.self) { _ in
+                HStack(spacing: 12) {
+                    RoundedRectangle(cornerRadius: 8)
+                        .fill(Color.gray.opacity(0.2))
+                        .frame(width: 50, height: 50)
+                    RoundedRectangle(cornerRadius: 4)
+                        .fill(Color.gray.opacity(0.2))
+                        .frame(width: 150, height: 14)
+                    Spacer()
+                }
+                .padding(.horizontal)
+            }
+        }
+    }
+
+    private var recommendSongsList: some View {
+        ForEach(recommendedSongs) { item in
+            HStack {
+                Button(action: {
+                    HapticManager.shared.selection()
+                    playTrack(item, from: recommendedSongs)
+                }) {
+                    HStack(spacing: 12) {
+                        AsyncImage(url: URL(string: item.absoluteCover)) { image in
+                            image.resizable().aspectRatio(contentMode: .fill)
+                        } placeholder: {
+                            Image(systemName: "music.note").foregroundColor(.secondary)
+                        }
+                        .frame(width: 50, height: 50)
+                        .cornerRadius(8)
+                        .clipped()
+                        VStack(alignment: .leading) {
+                            Text(item.name).font(.headline).lineLimit(1).foregroundColor(.primary)
+                            Text(item.artist).font(.subheadline).foregroundColor(.secondary)
+                        }
+                    }
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(PlainButtonStyle())
+                Spacer()
+                if playerManager.currentTrack?.id == item.id {
+                    Image(systemName: playerManager.isPlaying ? "pause.fill" : "play.fill")
+                        .foregroundColor(.accentColor)
+                        .frame(width: 24, height: 24)
+                } else {
+                    Image(systemName: "play.circle")
+                        .foregroundColor(.secondary)
+                        .frame(width: 24, height: 24)
+                }
+            }
+            .padding(.horizontal)
+            .padding(.vertical, 4)
+        }
+    }
+
+    // MARK: 模块4：最近播放
+    private var recentPlayedSection: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text("⏱ 最近播放")
+                .font(.title2.bold())
+                .padding(.horizontal)
+
+            ForEach(recentTracks.prefix(5)) { item in
+                HStack {
+                    Button(action: { playRecentTrack(item) }) {
+                        HStack {
+                            AsyncImage(url: URL(string: (item.imageUrl ?? "").normalizedMusicUrl)) { image in
+                                image.resizable().aspectRatio(contentMode: .fill)
+                            } placeholder: {
+                                Image(systemName: "music.note").foregroundColor(.secondary)
+                            }
+                            .frame(width: 50, height: 50)
+                            .cornerRadius(8)
+                            .clipped()
+                            VStack(alignment: .leading) {
+                                Text(item.name).font(.headline).foregroundColor(.primary)
+                                Text(item.singer).font(.subheadline).foregroundColor(.secondary)
+                            }
+                        }
+                    }
+                    .buttonStyle(PlainButtonStyle())
+                    Spacer()
+                    if playerManager.currentTrack?.id == item.id {
+                        Image(systemName: playerManager.isPlaying ? "pause.fill" : "play.fill")
+                            .foregroundColor(.accentColor)
+                            .frame(width: 24, height: 24)
+                    } else {
+                        Image(systemName: "play.circle")
+                            .foregroundColor(.secondary)
+                            .frame(width: 24, height: 24)
+                    }
+                }
+                .padding(.horizontal)
+            }
+        }
+    }
+
+    // MARK: 通用组件
+    private func errorView(_ message: String, retry: @escaping () -> Void) -> some View {
+        VStack(spacing: 8) {
+            Image(systemName: "exclamationmark.triangle")
+                .font(.system(size: 30))
+                .foregroundColor(.orange)
+            Text(message)
+                .font(.subheadline)
+                .foregroundColor(.secondary)
+                .multilineTextAlignment(.center)
+                .padding(.horizontal)
+            Button("重试") { retry() }
+                .buttonStyle(.bordered)
+        }
+        .frame(maxWidth: .infinity)
+        .padding(.vertical, 30)
+    }
+
+    private func fetchRankCategories() {
+        isLoadingRanks = true
+        rankError = nil
+        MusicApiService.shared.fetchRankList { result in
+            DispatchQueue.main.async {
+                isLoadingRanks = false
+                switch result {
+                case .success(let ranks):
+                    self.rankCategories = ranks
+                case .failure(let error):
+                    self.rankError = error.localizedDescription
                 }
             }
         }
     }
+
+    private func fetchPlaylists() {
+        isLoadingPlaylists = true
+        playlistError = nil
+        MusicApiService.shared.fetchRecommendPlaylists(page: 1, pageSize: 10) { result in
+            DispatchQueue.main.async {
+                isLoadingPlaylists = false
+                switch result {
+                case .success(let list):
+                    self.playlists = list
+                case .failure(let error):
+                    self.playlistError = error.localizedDescription
+                }
+            }
+        }
+    }
+
+    private func fetchRecommendSongs() {
+        isLoadingSongs = true
+        songsError = nil
+        MusicApiService.shared.fetchRecommendSongs(page: 1, pageSize: 10) { result in
+            DispatchQueue.main.async {
+                isLoadingSongs = false
+                switch result {
+                case .success(let songs):
+                    self.recommendedSongs = songs
+                case .failure(let error):
+                    self.songsError = error.localizedDescription
+                }
+            }
+        }
+    }
+
+    private func formatCount(_ count: Int) -> String {
+        if count >= 10000 {
+            return String(format: "%.1f万", Double(count) / 10000.0)
+        }
+        return "\(count)"
+    }
     
     private func playTrack(_ item: MusicApiService.MusicItem, from list: [MusicApiService.MusicItem]) {
-        MusicApiService.shared.resolvePlayUrl(url: item.absoluteUrl) { url in
-            guard let audioUrl = url else { return }
+        // 推荐歌曲的 url 字段可能为空，需要通过搜索 API 解析
+        if item.url.isEmpty {
+            MusicApiService.shared.resolveKugouPlayUrl(name: item.name, artist: item.artist, hash: item.id) { audioUrl, lrcUrl in
+                guard let audioUrl = audioUrl else { return }
+                DispatchQueue.main.async {
+                    self.playTrackWithUrl(item, audioUrl: audioUrl, lrcUrl: lrcUrl, from: list)
+                }
+            }
+        } else {
+            MusicApiService.shared.resolvePlayUrl(url: item.absoluteUrl) { url in
+                guard let audioUrl = url else { return }
+                DispatchQueue.main.async {
+                    self.playTrackWithUrl(item, audioUrl: audioUrl, lrcUrl: nil, from: list)
+                }
+            }
+        }
+    }
 
-            DispatchQueue.main.async {
-                let track = PlayerManager.MusicTrack(
-                    id: item.id,
-                    name: item.name,
-                    singer: item.artist,
-                    albumName: nil,
-                    imageUrl: item.absoluteCover,
-                    audioUrl: audioUrl,
-                    lrcUrl: item.absoluteLrc,
-                    lrc: nil,
-                    sourceUrl: item.absoluteUrl
-                )
-                playerManager.play(track: track)
-                // Sync playlist to recent tracks so next/previous buttons use the same data
-                playerManager.setPlaylistFromRecent(self.recentTracks)
-                saveToRecent(track, originalUrl: item.absoluteUrl)
-                // Update again after saving so the newly played track is included
-                playerManager.setPlaylistFromRecent(self.recentTracks)
+    private func playTrackWithUrl(_ item: MusicApiService.MusicItem, audioUrl: String, lrcUrl: String? = nil, from list: [MusicApiService.MusicItem]) {
+        let trackLrcUrl = lrcUrl?.isEmpty == false ? lrcUrl! : item.absoluteLrc
+        let track = PlayerManager.MusicTrack(
+            id: item.id,
+            name: item.name,
+            singer: item.artist,
+            albumName: nil,
+            imageUrl: item.absoluteCover,
+            audioUrl: audioUrl,
+            lrcUrl: trackLrcUrl,
+            lrc: nil,
+            sourceUrl: item.absoluteUrl
+        )
+        playerManager.play(track: track)
+        playerManager.setPlaylistFromRecent(self.recentTracks)
+        saveToRecent(track, originalUrl: item.absoluteUrl)
+        playerManager.setPlaylistFromRecent(self.recentTracks)
 
-                MusicApiService.shared.fetchLyric(lrcUrl: item.absoluteLrc) { lrc in
-                    if let lyric = lrc {
-                        DispatchQueue.main.async {
-                            playerManager.lyrics = lyric
-                            var updated = track
-                            updated.lrc = lyric
-                            saveToRecent(updated, originalUrl: item.absoluteUrl)
-                            playerManager.setPlaylistFromRecent(self.recentTracks)
-                        }
-                    }
+        MusicApiService.shared.fetchLyric(lrcUrl: trackLrcUrl) { lrc in
+            if let lyric = lrc {
+                DispatchQueue.main.async {
+                    playerManager.lyrics = lyric
+                    var updated = track
+                    updated.lrc = lyric
+                    saveToRecent(updated, originalUrl: item.absoluteUrl)
+                    playerManager.setPlaylistFromRecent(self.recentTracks)
                 }
             }
         }
@@ -765,20 +976,23 @@ struct MiniPlayerView: View {
                         Text(track.name)
                             .font(.system(size: 15, weight: .semibold))
                             .lineLimit(1)
-                        
+
                         HStack(spacing: 4) {
                             Text(track.singer)
                                 .font(.system(size: 13))
                                 .foregroundColor(.secondary)
                                 .lineLimit(1)
-                            
+                                .minimumScaleFactor(0.8)
+
                             Text("•")
                                 .font(.caption)
                                 .foregroundColor(.secondary)
-                            
+                                .fixedSize()
+
                             Text("\(formatTime(playerManager.currentTime)) / \(formatTime(playerManager.duration))")
                                 .font(.system(size: 11, design: .monospaced))
                                 .foregroundColor(.secondary)
+                                .fixedSize()
                         }
                     }
                 } else {

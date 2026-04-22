@@ -1,0 +1,170 @@
+{
+  "version": "1.0.0",
+  "lastScanned": 1776736750447,
+  "projectRoot": "/Users/will/my/music/Jmusic/Xmusic",
+  "techStack": {
+    "languages": [],
+    "frameworks": [],
+    "packageManager": null,
+    "runtime": null
+  },
+  "build": {
+    "buildCommand": null,
+    "testCommand": null,
+    "lintCommand": null,
+    "devCommand": null,
+    "scripts": {}
+  },
+  "conventions": {
+    "namingStyle": null,
+    "importStyle": null,
+    "testPattern": null,
+    "fileOrganization": null
+  },
+  "structure": {
+    "isMonorepo": false,
+    "workspaces": [],
+    "mainDirectories": [],
+    "gitBranches": {
+      "defaultBranch": "main",
+      "branchingStrategy": null
+    }
+  },
+  "customNotes": [],
+  "directoryMap": {
+    "Sources": {
+      "path": "Sources",
+      "purpose": null,
+      "fileCount": 12,
+      "lastAccessed": 1776736750435,
+      "keyFiles": [
+        "ContentView.swift",
+        "DetailListView.swift",
+        "HapticManager.swift",
+        "MusicApiService.swift",
+        "MusicCacheManager.swift"
+      ]
+    },
+    "Xmusic.xcodeproj": {
+      "path": "Xmusic.xcodeproj",
+      "purpose": null,
+      "fileCount": 1,
+      "lastAccessed": 1776736750435,
+      "keyFiles": [
+        "project.pbxproj"
+      ]
+    },
+    "screen": {
+      "path": "screen",
+      "purpose": null,
+      "fileCount": 5,
+      "lastAccessed": 1776736750436,
+      "keyFiles": [
+        "home.jpg",
+        "home2.jpg",
+        "list.jpg",
+        "my.jpg",
+        "play.jpg"
+      ]
+    }
+  },
+  "hotPaths": [
+    {
+      "path": "Sources/MusicApiService.swift",
+      "accessCount": 160,
+      "lastAccessed": 1776772648321,
+      "type": "file"
+    },
+    {
+      "path": "Sources/ContentView.swift",
+      "accessCount": 29,
+      "lastAccessed": 1776773054367,
+      "type": "file"
+    },
+    {
+      "path": "Sources/RankCategoryView.swift",
+      "accessCount": 25,
+      "lastAccessed": 1776772146430,
+      "type": "file"
+    },
+    {
+      "path": "doc.md",
+      "accessCount": 14,
+      "lastAccessed": 1776772326377,
+      "type": "file"
+    },
+    {
+      "path": "Sources/PlaylistDetailView.swift",
+      "accessCount": 13,
+      "lastAccessed": 1776771672706,
+      "type": "file"
+    },
+    {
+      "path": "Sources/PlaylistListView.swift",
+      "accessCount": 10,
+      "lastAccessed": 1776772748588,
+      "type": "file"
+    },
+    {
+      "path": "Sources",
+      "accessCount": 8,
+      "lastAccessed": 1776772321961,
+      "type": "directory"
+    },
+    {
+      "path": "Sources/MusicCacheManager.swift",
+      "accessCount": 7,
+      "lastAccessed": 1776760867949,
+      "type": "file"
+    },
+    {
+      "path": "Sources/PlayerManager.swift",
+      "accessCount": 5,
+      "lastAccessed": 1776760671608,
+      "type": "file"
+    },
+    {
+      "path": "Xmusic-Info.plist",
+      "accessCount": 4,
+      "lastAccessed": 1776739582224,
+      "type": "file"
+    },
+    {
+      "path": "Sources/DetailListView.swift",
+      "accessCount": 2,
+      "lastAccessed": 1776737640605,
+      "type": "file"
+    },
+    {
+      "path": "Sources/PlayerView.swift",
+      "accessCount": 2,
+      "lastAccessed": 1776768194693,
+      "type": "file"
+    },
+    {
+      "path": "Sources/XmusicApp.swift",
+      "accessCount": 1,
+      "lastAccessed": 1776736901594,
+      "type": "file"
+    },
+    {
+      "path": "Sources/RecentPlaylistView.swift",
+      "accessCount": 1,
+      "lastAccessed": 1776736901692,
+      "type": "file"
+    },
+    {
+      "path": "Sources/MusicTrackEntity.swift",
+      "accessCount": 1,
+      "lastAccessed": 1776736912876,
+      "type": "file"
+    },
+    {
+      "path": "Sources/RecentTrackEntity.swift",
+      "accessCount": 1,
+      "lastAccessed": 1776736912891,
+      "type": "file"
+    }
+  ],
+  "userDirectives": []
+}
