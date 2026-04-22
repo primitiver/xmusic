@@ -29,7 +29,53 @@ struct PlayerView: View {
                 }
                 .ignoresSafeArea()
             }
-            
+
+            // Full-screen lyrics overlay
+            if showingLyrics {
+                lyricsView
+                    .gesture(
+                        DragGesture()
+                            .onEnded { value in
+                                if value.translation.width > 80 {
+                                    // Right swipe → back to player
+                                    withAnimation { showingLyrics = false }
+                                }
+                            }
+                    )
+                    .transition(.move(edge: .trailing))
+                    .animation(.spring(), value: showingLyrics)
+                    .zIndex(2)
+            }
+
+            // Main player content
+            if !showingLyrics {
+                mainPlayerView
+                    .zIndex(1)
+                    .gesture(
+                        DragGesture()
+                            .onEnded { value in
+                                if value.translation.width < -80 {
+                                    // Left swipe → show lyrics
+                                    withAnimation { showingLyrics = true }
+                                }
+                            }
+                    )
+            }
+        }
+        .preferredColorScheme(.dark)
+        .sheet(isPresented: $showingRecentList) {
+            RecentPlaylistView()
+                .environmentObject(playerManager)
+        }
+        .onAppear {
+            playerManager.setPlaylistFromRecent(recentTracks)
+        }
+    }
+
+    // MARK: - Main Player View (Album Art + Controls)
+
+    private var mainPlayerView: some View {
+        GeometryReader { geo in
             VStack(spacing: 0) {
                 // Top Bar
                 HStack {
@@ -38,224 +84,280 @@ struct PlayerView: View {
                             .font(.title2.bold())
                     }
                     .frame(width: 44, height: 44)
-                    
+
                     Spacer()
-                    
+
                     Text("正在播放")
                         .font(.headline)
-                    
+
                     Spacer()
+
+                    // Lyrics button
+                    Button(action: {
+                        withAnimation { showingLyrics = true }
+                    }) {
+                        Image(systemName: "text.quote")
+                            .font(.title2)
+                    }
+                    .frame(width: 44, height: 44)
                 }
                 .padding(.horizontal)
                 .foregroundColor(.white)
                 .padding(.top, 10)
-                
+
                 Spacer()
-                
-                // Paging View for Album Art and Lyrics
-                TabView(selection: $showingLyrics) {
-                    // Page 0: Album Art
-                    VStack {
-                        if let track = playerManager.currentTrack {
-                            GeometryReader { geo in
-                                AsyncImage(url: URL(string: (track.imageUrl ?? "").normalizedMusicUrl)) { image in
-                                    image.resizable()
-                                        .aspectRatio(contentMode: .fit)
-                                        .cornerRadius(20)
-                                        .shadow(radius: 20)
-                                } placeholder: {
-                                    RoundedRectangle(cornerRadius: 20)
-                                        .fill(Color.gray.opacity(0.3))
-                                        .overlay(Image(systemName: "music.note").font(.system(size: 80)))
-                                }
-                                .frame(width: geo.size.width * 0.8)
-                                .frame(maxWidth: .infinity, maxHeight: .infinity)
-                            }
-                            .padding(20)
-                        }
+
+                // Album Art
+                if let track = playerManager.currentTrack {
+                    AsyncImage(url: URL(string: (track.imageUrl ?? "").normalizedMusicUrl)) { image in
+                        image.resizable()
+                            .aspectRatio(contentMode: .fit)
+                            .cornerRadius(20)
+                            .shadow(radius: 20)
+                    } placeholder: {
+                        RoundedRectangle(cornerRadius: 20)
+                            .fill(Color.gray.opacity(0.3))
+                            .overlay(Image(systemName: "music.note").font(.system(size: 80)))
                     }
-                    .tag(false)
-                    
-                    // Page 1: Lyrics
-                    VStack {
-                        ScrollViewReader { proxy in
-                            ScrollView(showsIndicators: false) {
-                                VStack(spacing: 25) {
-                                    if playerManager.parsedLyrics.isEmpty {
-                                        Text(playerManager.lyrics.isEmpty ? "暂无歌词" : playerManager.lyrics)
-                                            .font(.title2)
-                                            .multilineTextAlignment(.center)
-                                            .foregroundColor(.white)
-                                    } else {
-                                        ForEach(playerManager.parsedLyrics) { line in
-                                            let isActive = isCurrentLine(line)
-                                            Text(line.text)
-                                                .font(isActive ? .title2.bold() : .title3)
-                                                .multilineTextAlignment(.center)
-                                                .foregroundColor(isActive ? .white : .white.opacity(0.4))
-                                                .scaleEffect(isActive ? 1.05 : 1.0)
-                                                .animation(.spring(), value: isActive)
-                                                .id(line.id)
-                                                .padding(.horizontal)
-                                        }
-                                    }
-                                }
-                                .padding(.vertical, 100)
-                            }
-                            .onChange(of: playerManager.currentTime) { newValue in
-                                if let currentLineID = activeLineID() {
-                                    withAnimation {
-                                        proxy.scrollTo(currentLineID, anchor: .center)
-                                    }
-                                }
-                            }
-                        }
-                    }
-                    .tag(true)
+                    .frame(width: geo.size.width * 0.8)
+                    .padding(20)
                 }
-                .tabViewStyle(.page(indexDisplayMode: .always))
-                .frame(maxHeight: .infinity)
-                
+
                 Spacer()
-                
+
                 // Track Info & Controls - Bottom Section
-                VStack(spacing: 30) {
-                    HStack {
-                        VStack(alignment: .leading, spacing: 5) {
-                            Text(playerManager.currentTrack?.name ?? "未知歌曲")
-                                .font(.title2.bold())
-                                .lineLimit(1)
-                            Text(playerManager.currentTrack?.singer ?? "未知歌手")
-                                .font(.headline)
-                                .foregroundColor(.white.opacity(0.8))
-                                .lineLimit(1)
-                        }
-                        Spacer()
+                trackInfoAndControls
+            }
+        }
+    }
 
-                        if let track = playerManager.currentTrack {
-                            Button(action: {
-                                toggleFavorite(track)
-                            }) {
-                                Image(systemName: isFavorite(track.id) ? "heart.fill" : "heart")
-                                    .font(.title2)
-                                    .foregroundColor(isFavorite(track.id) ? .red : .white)
-                            }
+    // MARK: - Track Info & Controls
 
-                            // Recent Playlist Button
-                            Button(action: { showingRecentList = true }) {
-                                Image(systemName: "list.bullet")
-                                    .font(.title2)
-                                    .foregroundColor(.white)
-                            }
-                        }
+    private var trackInfoAndControls: some View {
+        VStack(spacing: 30) {
+            HStack {
+                VStack(alignment: .leading, spacing: 5) {
+                    Text(playerManager.currentTrack?.name ?? "未知歌曲")
+                        .font(.title2.bold())
+                        .lineLimit(1)
+                    Text(playerManager.currentTrack?.singer ?? "未知歌手")
+                        .font(.headline)
+                        .foregroundColor(.white.opacity(0.8))
+                        .lineLimit(1)
+                }
+                Spacer()
+
+                if let track = playerManager.currentTrack {
+                    Button(action: {
+                        toggleFavorite(track)
+                    }) {
+                        Image(systemName: isFavorite(track.id) ? "heart.fill" : "heart")
+                            .font(.title2)
+                            .foregroundColor(isFavorite(track.id) ? .red : .white)
                     }
-                    .padding(.horizontal, 30)
-                    
-                    // Progress Bar
-                    VStack(spacing: 8) {
-                        ZStack(alignment: .leading) {
-                            // Buffer Track
-                            GeometryReader { geo in
-                                Capsule()
-                                    .fill(Color.white.opacity(0.2))
-                                    .frame(width: geo.size.width * CGFloat(playerManager.bufferedTime / max(playerManager.duration, 1)))
-                            }
-                            .frame(height: 3) // Match slider track height approximately
-                            
-                            Slider(value: $localTime, in: 0...max(playerManager.duration, 1), onEditingChanged: { dragging in
-                                if dragging {
-                                    isDraggingSlider = true
-                                } else {
-                                    playerManager.seek(to: localTime)
-                                }
-                            })
-                            .accentColor(.white)
-                        }
-                        
-                        HStack {
-                            Text(formatTime(isDraggingSlider ? localTime : playerManager.currentTime))
-                            Spacer()
-                            Text(formatTime(playerManager.duration))
-                        }
-                    }
-                    .padding(.horizontal, 30)
-                    .onChange(of: playerManager.currentTime) { newValue in
-                        if isDraggingSlider {
-                            // 如果播放器的新时间已经接近我们设置的时间，就认为 seek 完成
-                            if abs(localTime - newValue) < 0.5 {
-                                isDraggingSlider = false
-                            }
-                        } else {
-                            localTime = newValue
-                        }
-                    }
-                    
-                    // Main Controls
-                    HStack(spacing: 25) {
-                        // Play Mode Button - Left side
-                        Button(action: {
-                            playerManager.togglePlayMode()
-                            HapticManager.shared.selection()
-                        }) {
-                            Image(systemName: playModeIcon)
-                                .font(.body)
-                                .foregroundColor(.white.opacity(0.7))
-                                .frame(width: 44, height: 44)
-                        }
-
-                        Button(action: {
-                            playerManager.playPrevious()
-                            HapticManager.shared.selection()
-                        }) {
-                            Image(systemName: "backward.fill")
-                                .font(.title)
-                                .foregroundColor(playerManager.canPlayPrevious() ? .white : .gray)
-                                .frame(width: 44, height: 44)
-                        }
-                        .disabled(!playerManager.canPlayPrevious())
-
-                        Button(action: {
-                            playerManager.togglePlayPause()
-                            HapticManager.shared.selection()
-                        }) {
-                            Image(systemName: playerManager.isPlaying ? "pause.circle.fill" : "play.circle.fill")
-                                .font(.system(size: 70))
-                        }
-
-                        Button(action: {
-                            playerManager.playNext()
-                            HapticManager.shared.selection()
-                        }) {
-                            Image(systemName: "forward.fill")
-                                .font(.title)
-                                .foregroundColor(playerManager.canPlayNext() ? .white : .gray)
-                        }
-                        .disabled(!playerManager.canPlayNext())
-
-                        // Recent List Button - Right side
-                        Button(action: {
-                            showingRecentList = true
-                            HapticManager.shared.selection()
-                        }) {
-                            Image(systemName: "clock.arrow.circlepath")
-                                .font(.body)
-                                .foregroundColor(.white.opacity(0.7))
-                                .frame(width: 44, height: 44)
-                        }
-                    }
-                    .padding(.bottom, 50)
                 }
             }
-            .foregroundColor(.white)
+            .padding(.horizontal, 30)
+
+            // Progress Bar
+            progressSection
+
+            // Main Controls
+            controlsSection
+                .padding(.bottom, 50)
         }
-        .preferredColorScheme(.dark)
-        .sheet(isPresented: $showingRecentList) {
-            RecentPlaylistView()
-                .environmentObject(playerManager)
+    }
+
+    // MARK: - Progress Section
+
+    private var progressSection: some View {
+        VStack(spacing: 8) {
+            ZStack(alignment: .leading) {
+                // Buffer Track
+                GeometryReader { geo in
+                    Capsule()
+                        .fill(Color.white.opacity(0.2))
+                        .frame(width: geo.size.width * CGFloat(playerManager.bufferedTime / max(playerManager.duration, 1)))
+                }
+                .frame(height: 3)
+
+                Slider(value: $localTime, in: 0...max(playerManager.duration, 1), onEditingChanged: { dragging in
+                    if dragging {
+                        isDraggingSlider = true
+                    } else {
+                        playerManager.seek(to: localTime)
+                    }
+                })
+                .accentColor(.white)
+            }
+
+            HStack {
+                Text(formatTime(isDraggingSlider ? localTime : playerManager.currentTime))
+                Spacer()
+                Text(formatTime(playerManager.duration))
+            }
         }
-        .onAppear {
-            // Sync playlist whenever full player appears
-            playerManager.setPlaylistFromRecent(recentTracks)
+        .padding(.horizontal, 30)
+        .onChange(of: playerManager.currentTime) { newValue in
+            if isDraggingSlider {
+                if abs(localTime - newValue) < 0.5 {
+                    isDraggingSlider = false
+                }
+            } else {
+                localTime = newValue
+            }
+        }
+    }
+
+    // MARK: - Controls Section
+
+    private var controlsSection: some View {
+        HStack(spacing: 25) {
+            // Play Mode Button
+            Button(action: {
+                playerManager.togglePlayMode()
+                HapticManager.shared.selection()
+            }) {
+                Image(systemName: playModeIcon)
+                    .font(.body)
+                    .foregroundColor(.white.opacity(0.7))
+                    .frame(width: 44, height: 44)
+            }
+
+            Button(action: {
+                playerManager.playPrevious()
+                HapticManager.shared.selection()
+            }) {
+                Image(systemName: "backward.fill")
+                    .font(.title)
+                    .foregroundColor(playerManager.canPlayPrevious() ? .white : .gray)
+                    .frame(width: 44, height: 44)
+            }
+            .disabled(!playerManager.canPlayPrevious())
+
+            Button(action: {
+                playerManager.togglePlayPause()
+                HapticManager.shared.selection()
+            }) {
+                Image(systemName: playerManager.isPlaying ? "pause.circle.fill" : "play.circle.fill")
+                    .font(.system(size: 70))
+            }
+
+            Button(action: {
+                playerManager.playNext()
+                HapticManager.shared.selection()
+            }) {
+                Image(systemName: "forward.fill")
+                    .font(.title)
+                    .foregroundColor(playerManager.canPlayNext() ? .white : .gray)
+            }
+            .disabled(!playerManager.canPlayNext())
+
+            // Recent List Button
+            Button(action: {
+                showingRecentList = true
+                HapticManager.shared.selection()
+            }) {
+                Image(systemName: "clock.arrow.circlepath")
+                    .font(.body)
+                    .foregroundColor(.white.opacity(0.7))
+                    .frame(width: 44, height: 44)
+            }
+        }
+    }
+
+    // MARK: - Lyrics Full-Screen View
+
+    private var lyricsView: some View {
+        GeometryReader { geo in
+            ZStack {
+                // Background
+                if let track = playerManager.currentTrack {
+                    AsyncImage(url: URL(string: (track.imageUrl ?? "").normalizedMusicUrl)) { image in
+                        image.resizable()
+                            .aspectRatio(contentMode: .fill)
+                            .frame(width: geo.size.width, height: geo.size.height)
+                            .blur(radius: 50)
+                            .opacity(0.5)
+                    } placeholder: {
+                        Color.black
+                    }
+                }
+
+                VStack {
+                    // Top Bar
+                    HStack {
+                        Button(action: {
+                            withAnimation { showingLyrics = false }
+                        }) {
+                            Image(systemName: "chevron.left")
+                                .font(.title2.bold())
+                        }
+                        .frame(width: 44, height: 44)
+
+                        Spacer()
+
+                        Text("歌词")
+                            .font(.headline)
+
+                        Spacer()
+
+                        Spacer().frame(width: 44)
+                    }
+                    .padding(.horizontal)
+                    .foregroundColor(.white)
+                    .padding(.top, 10)
+
+                    // Lyrics Content
+                    ScrollViewReader { proxy in
+                        ScrollView(showsIndicators: false) {
+                            VStack(spacing: 25) {
+                                if playerManager.parsedLyrics.isEmpty {
+                                    Text(playerManager.lyrics.isEmpty ? "暂无歌词" : playerManager.lyrics)
+                                        .font(.title2)
+                                        .multilineTextAlignment(.center)
+                                        .foregroundColor(.white)
+                                } else {
+                                    ForEach(playerManager.parsedLyrics) { line in
+                                        let isActive = isCurrentLine(line)
+                                        Text(line.text)
+                                            .font(isActive ? .title2.bold() : .title3)
+                                            .multilineTextAlignment(.center)
+                                            .foregroundColor(isActive ? .white : .white.opacity(0.4))
+                                            .scaleEffect(isActive ? 1.05 : 1.0)
+                                            .animation(.spring(), value: isActive)
+                                            .id(line.id)
+                                            .padding(.horizontal)
+                                    }
+                                }
+                            }
+                            .padding(.vertical, 100)
+                        }
+                        .onChange(of: playerManager.currentTime) { newValue in
+                            if let currentLineID = activeLineID() {
+                                withAnimation {
+                                    proxy.scrollTo(currentLineID, anchor: .center)
+                                }
+                            }
+                        }
+                    }
+
+                    // Bottom: swipe back hint
+                    HStack {
+                        Button(action: {
+                            withAnimation { showingLyrics = false }
+                        }) {
+                            HStack {
+                                Image(systemName: "chevron.left")
+                                Text("返回播放")
+                            }
+                            .foregroundColor(.white.opacity(0.6))
+                        }
+                    }
+                    .padding(.bottom, 30)
+                }
+            }
+            .ignoresSafeArea()
         }
     }
     

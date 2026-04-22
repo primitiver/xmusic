@@ -77,8 +77,14 @@
     },
     {
       "path": "Sources/ContentView.swift",
-      "accessCount": 79,
-      "lastAccessed": 1776818069094,
+      "accessCount": 83,
+      "lastAccessed": 1776820330657,
+      "type": "file"
+    },
+    {
+      "path": "Sources/PlayerView.swift",
+      "accessCount": 40,
+      "lastAccessed": 1776821785146,
       "type": "file"
     },
     {
@@ -103,12 +109,6 @@
       "path": "Sources/PlaylistDetailView.swift",
       "accessCount": 15,
       "lastAccessed": 1776774999772,
-      "type": "file"
-    },
-    {
-      "path": "Sources/PlayerView.swift",
-      "accessCount": 14,
-      "lastAccessed": 1776773591708,
       "type": "file"
     },
     {

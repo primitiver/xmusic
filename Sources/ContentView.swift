@@ -45,7 +45,7 @@ struct ContentView: View {
                 }
         }
         .environmentObject(playerManager)
-        .sheet(isPresented: $isShowingPlayer) {
+        .fullScreenCover(isPresented: $isShowingPlayer) {
             PlayerView()
                 .environmentObject(playerManager)
         }
